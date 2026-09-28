@@ -1,4 +1,4 @@
-# Oafish Grass Runtime (OGR) v0.2.0
+# Oafish Grass Runtime (OGR) v0.2.2
 
 Standalone WED-authored animated grass runtime for X-Plane 11/12.
 
@@ -20,26 +20,42 @@ OGR is deliberately separate from SSA. WED authors the grass area; OGR reads the
 - upward normals to avoid black grass cards
 - strict WED polygon edge margin so grass cards do not spill onto asphalt
 
-## New in v0.2.0: direct WED DSF reading
+## New in v0.2.2: dynamic grass streaming
 
-The normal workflow no longer requires `BUILD_GRASS_AREAS.cmd`.
+Large WED grass polygons are no longer tied to one fixed candidate list generated from one edge of the area. OGR now builds a deterministic camera-centered candidate window and recenters it as the camera moves.
 
-After WED exports the scenery pack, OGR scans the pack's exported `Earth nav data/**/*.dsf`, finds forest polygons whose resource is exactly `OafishGrass/ogr_grass.for`, decodes their polygon windings/holes and WED density, then feeds those areas into the existing proven runtime automatically.
+The streaming window:
 
-WED encodes forest density in the polygon parameter and OGR decodes that value directly. v0.2 reads WED **Area** forest placements; line/point forest modes are ignored.
+- keeps up to 10,000 candidate grass placements by default
+- preserves the 1,600 active-instance cap
+- keeps dense grass near the camera
+- uses a coarser outer ring when the dense region does not fill the candidate budget
+- reuses overlapping XPLM instances while the window moves, reducing mass popping
+- retains the v0.2.1 spatial-bin culling path, so recurring refreshes do not scan every candidate
+- follows external/free cameras as well as the aircraft, including while viewing replay
+
+This lets one very large WED polygon cover an entire airport without the old failure mode where the first candidate cap was consumed at only one side of the polygon.
+
+## Direct WED DSF reading
+
+The normal workflow does not require `BUILD_GRASS_AREAS.cmd`.
+
+After WED exports the scenery pack, OGR scans the pack's exported `Earth nav data/**/*.dsf`, finds forest polygons whose resource is exactly `OafishGrass/ogr_grass.for`, decodes their polygon windings/holes and WED density, then feeds those areas into the runtime automatically.
+
+WED encodes forest density in the polygon parameter and OGR decodes that value directly. OGR reads WED **Area** forest placements; line/point forest modes are ignored.
 
 The old `ogr_areas.json` format remains as an internal compatibility hand-off to the stable runtime. OGR regenerates it automatically from DSF when direct parsing succeeds. `BUILD_GRASS_AREAS.cmd` remains in the starter pack only as an optional fallback for compressed/unsupported DSFs.
 
 ### Direct DSF compatibility
 
 - uncompressed DSF master version 1: direct reader enabled
-- normal WED custom scenery export: intended v0.2 path
+- normal WED custom scenery export: intended path
 - 7z-compressed DSF: detected and left to the legacy JSON/CMD fallback
 - parser failure: existing legacy `ogr_areas.json` is preserved rather than overwritten
 
 ## Replay-aware grass effects
 
-OGR keeps the v0.1.1 replay system. It records a lightweight 20 Hz history for up to about 20 minutes containing:
+OGR records a lightweight 20 Hz history for up to about 20 minutes containing:
 
 - per-engine wash power and RPM ratio
 - engine position relative to the aircraft
@@ -59,7 +75,7 @@ When `sim/time/is_in_replay` is active, OGR restores the recorded engine wash an
 6. **Save and Export Scenery Pack** in WED.
 7. Start X-Plane, or use `Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas`.
 
-That is the normal v0.2 workflow. No Python/CMD step is required after a normal uncompressed WED export.
+No Python/CMD step is required after a normal uncompressed WED export.
 
 The `.for` file remains a valid XP11 forest resource for WED authoring. Lines beginning with `#OGR_` are OGR metadata comments used for models and runtime tuning.
 
@@ -80,7 +96,7 @@ Edit `OafishGrass/ogr_grass.for` to tune a scenery pack. Examples:
 #OGR_ENGINE_WASH_STRENGTH 1.3
 #OGR_ENGINE_WASH_RANGE_M 35.0
 #OGR_MAX_ACTIVE_TILES 1600
-#OGR_MAX_TOTAL_TILES 8000
+#OGR_MAX_TOTAL_TILES 10000
 #OGR_HIDE_AIRCRAFT_AGL_FT 3000
 ```
 
@@ -88,10 +104,12 @@ Edit `OafishGrass/ogr_grass.for` to tune a scenery pack. Examples:
 
 ## Performance profile
 
-The default profile stays conservative for older iGPU systems:
+The default profile remains conservative for older iGPU systems:
 
 - at most 1600 active instances around the camera
-- at most 8000 candidate placements per scenery pack
+- up to 10,000 camera-local candidate placements per scenery pack
+- dynamic candidate recentering only after meaningful camera movement
+- spatial bins avoid full candidate scans during normal active-set refreshes
 - animation at 20 Hz (`0.05 s`)
 - active-set refresh every `0.35 s`
 - far grass stops receiving animation updates
@@ -114,6 +132,6 @@ The C++ test suite includes grass/engine-wash math, replay history and direct DS
 ## Current limitations
 
 - One distinct OGR `.for` resource per scenery pack. You may draw many WED polygons/holes using it.
-- Direct v0.2 reading targets uncompressed DSF v1 and WED Area forest placements.
+- Direct reading targets uncompressed DSF v1 and WED Area forest placements.
 - 7z-compressed DSFs currently use the legacy `ogr_areas.json` / `BUILD_GRASS_AREAS.cmd` fallback.
 - Replay effects are available inside OGR's in-memory history window (up to about 20 minutes).
