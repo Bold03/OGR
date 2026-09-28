@@ -118,9 +118,13 @@ private:
   };
 
   // The original v0.1 update loop is compiled as update_live(). The public
-  // update() wrapper adds replay recording/playback while reusing the stable
-  // culling, terrain probing and grass animation path.
+  // update() wrapper adds replay recording/playback while reusing stable
+  // geometry/terrain code. v0.2.1 routes hot-path culling/animation through
+  // spatial bins so large candidate sets do not cost a full scan each tick.
   void update_live(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
+  void update_live_fast(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
+  void ensure_spatial_index(Pack& pack);
+  void refresh_active_set_fast(Pack& pack, float camera_x, float camera_z);
 
   void load_datarefs();
   std::vector<std::filesystem::path> active_scenery_roots() const;
