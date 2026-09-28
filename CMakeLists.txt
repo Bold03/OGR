@@ -26,7 +26,13 @@ target_include_directories(OafishGrass PRIVATE
 )
 target_link_libraries(OafishGrass PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(OafishGrass PRIVATE XPLM303 XPLM301 XPLM300 XPLM210 XPLM200)
-set_target_properties(OafishGrass PROPERTIES PREFIX "" SUFFIX ".xpl")
+# XPLM 3.0 package layout expects the binary name to match the plugin package
+# name: OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl.
+set_target_properties(OafishGrass PROPERTIES
+  PREFIX ""
+  SUFFIX ".xpl"
+  OUTPUT_NAME "OafishGrassRuntime"
+)
 
 if(WIN32)
   target_compile_definitions(OafishGrass PRIVATE IBM=1 NOMINMAX WIN32_LEAN_AND_MEAN)
