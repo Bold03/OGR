@@ -1,0 +1,6 @@
+Oafish Grass Runtime starter project
+
+The OGR source in this package was prepared for this project.
+Third-party build dependency: nlohmann/json (MIT), downloaded by CMake FetchContent.
+X-Plane SDK headers/libraries are not redistributed in this source package.
+The included grass A/B/C models and atlas are the project's existing grass assets.

@@ -1,0 +1,47 @@
+OAFISH GRASS RUNTIME v0.1.0 - START HERE
+========================================
+
+1) BUILD the plugin from this source (GitHub Actions is already included).
+
+2) INSTALL:
+   X-Plane 11\Resources\plugins\OafishGrassRuntime\win_x64\OafishGrass.xpl
+
+3) COPY this folder into your scenery:
+   release\WED-Starter\OafishGrass
+
+   Example result:
+   X-Plane 11\Custom Scenery\WIDN Tanjung Pinang\OafishGrass\ogr_grass.for
+
+4) IN WED:
+   - Choose Forest Tool
+   - Resource: OafishGrass/ogr_grass.for
+   - Draw the grass polygon exactly where grass is allowed
+   - Holes are supported
+   - Set WED Density as desired
+   - Save WED and Export Scenery Pack
+
+5) DOUBLE CLICK:
+   OafishGrass\BUILD_GRASS_AREAS.cmd
+
+   It converts earth.wed.xml -> OafishGrass\ogr_areas.json.
+
+6) START X-PLANE.
+   OGR scans active Custom Scenery packs and loads their ogr_areas.json.
+
+7) AFTER EDITING WED:
+   Run BUILD_GRASS_AREAS.cmd again, then use:
+   Plugins > Oafish Grass Runtime > Reload WED grass areas
+
+DEFAULTS:
+- Draw/OBJ LOD: 914.4 m = 3000 ft
+- Animated ring: 600 m
+- Boundary safety margin: 1.4 m
+- Weather wind: ON
+- Prop RPM/thrust wash: ON
+- Jet N1/thrust wash: ON
+- Max active grass: 1600
+- No shadow / no black grass cards retained
+
+IMPORTANT:
+The .for file is used for WED authoring and OGR metadata. The standalone OGR
+plugin draws the real grass. SSA is not required for grass anymore.
