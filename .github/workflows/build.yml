@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Test C++ grass core
+      - name: Test C++ grass core and replay history
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Test WED area exporter
@@ -44,15 +44,15 @@ jobs:
           Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl
           Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
           Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.1.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.1.1-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.1.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.1.1-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.1.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.1.0 Windows Build #${{ github.run_number }}" \
-            --notes "Automated Windows build. WED-authored grass runtime for X-Plane 11/12. Published directly to Releases; Actions artifact storage is not used."
+            "OGR-v0.1.1-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.1.1 Windows Build #${{ github.run_number }}" \
+            --notes "Replay-aware Windows build: recorded prop RPM / jet power / engine wash and weather wind are restored while viewing X-Plane replay. Published directly to Releases; Actions artifact storage is not used."
