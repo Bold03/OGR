@@ -1,0 +1,58 @@
+name: Build Oafish Grass Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags: [ "v*", "ogr-v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download X-Plane SDK 4.3.0
+        shell: bash
+        run: |
+          curl -fL --retry 3 -o sdk.zip https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip
+          unzip -q sdk.zip -d sdk
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DXPLANE_SDK_ROOT="$PWD/sdk/SDK"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test C++ grass core
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Test WED area exporter
+        run: python tests/test_wed_extract.py
+
+      - name: Stage package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package/OafishGrassRuntime/win_x64 | Out-Null
+          New-Item -ItemType Directory -Force package/WED-Starter | Out-Null
+          $xpl = Get-ChildItem -Recurse build -Filter OafishGrass.xpl | Select-Object -First 1
+          if (-not $xpl) { throw "OafishGrass.xpl not found" }
+          Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrass.xpl
+          Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
+          Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.1.0-win_x64-build-${{ github.run_number }}.zip" -Force
+
+      - name: Publish directly to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="ogr-v0.1.0-build-${{ github.run_number }}"
+          gh release create "$TAG" \
+            "OGR-v0.1.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.1.0 Windows Build #${{ github.run_number }}" \
+            --notes "Automated Windows build. WED-authored grass runtime for X-Plane 11/12. Published directly to Releases; Actions artifact storage is not used."
