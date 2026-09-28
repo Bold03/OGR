@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
+#include <unordered_map>
 
 namespace ogr {
 namespace {
@@ -35,6 +37,24 @@ int spatial_coord(float value, float cell) {
   return static_cast<int>(std::floor(value / std::max(1.0f, cell)));
 }
 
+uint64_t mix64(uint64_t value) {
+  value ^= value >> 30;
+  value *= 0xbf58476d1ce4e5b9ULL;
+  value ^= value >> 27;
+  value *= 0x94d049bb133111ebULL;
+  value ^= value >> 31;
+  return value;
+}
+
+uint64_t stream_candidate_key(size_t area_index, int ix, int iz, uint32_t tier) {
+  uint64_t value = static_cast<uint64_t>(area_index + 1) * 0x9e3779b97f4a7c15ULL;
+  value ^= static_cast<uint64_t>(static_cast<uint32_t>(ix)) << 1;
+  value ^= static_cast<uint64_t>(static_cast<uint32_t>(iz)) << 33;
+  value ^= static_cast<uint64_t>(tier) * 0xd6e8feb86659fd93ULL;
+  value = mix64(value);
+  return value ? value : 1ULL;
+}
+
 } // namespace
 
 void Runtime::ensure_spatial_index(Pack& pack) {
@@ -45,8 +65,8 @@ void Runtime::ensure_spatial_index(Pack& pack) {
   pack.spatial_cell_m = std::clamp(pack.settings.draw_distance_m * 0.25f, 64.0f, 256.0f);
   pack.spatial_bins.clear();
   pack.spatial_bins.reserve(std::max<size_t>(16, pack.tiles.size() / 24));
-  pack.active_indices.clear();
-  pack.active_indices.reserve(static_cast<size_t>(pack.settings.max_active_tiles));
+  if (pack.active_indices.capacity() < static_cast<size_t>(pack.settings.max_active_tiles))
+    pack.active_indices.reserve(static_cast<size_t>(pack.settings.max_active_tiles));
   pack.active_epoch = 1;
 
   for (size_t i = 0; i < pack.tiles.size(); ++i) {
@@ -56,9 +76,174 @@ void Runtime::ensure_spatial_index(Pack& pack) {
     pack.spatial_bins[spatial_key(cx, cz)].push_back(i);
   }
 
-  log("Spatial grass index ready for " + pack.name + ": " +
-      std::to_string(pack.tiles.size()) + " candidate(s) in " +
-      std::to_string(pack.spatial_bins.size()) + " bin(s)");
+  if (!pack.spatial_log_done) {
+    log("Spatial grass index ready for " + pack.name + ": " +
+        std::to_string(pack.tiles.size()) + " candidate(s) in " +
+        std::to_string(pack.spatial_bins.size()) + " bin(s)");
+    pack.spatial_log_done = true;
+  }
+}
+
+void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) {
+  if (pack.objects.empty() || pack.local_areas.empty()) return;
+
+  const float recenter = std::clamp(pack.settings.tile_size_m * 24.0f, 48.0f, 90.0f);
+  pack.stream_recenter_m = recenter;
+  if (pack.stream_initialized &&
+      distance2(camera_x, camera_z, pack.stream_center_x, pack.stream_center_z) <= recenter * recenter)
+    return;
+
+  const bool first_stream = !pack.stream_initialized;
+  const size_t budget = static_cast<size_t>(std::max(100, pack.settings.max_total_tiles));
+
+  struct StreamCandidate {
+    Tile tile;
+    float d2{};
+  };
+  std::vector<StreamCandidate> candidates;
+  candidates.reserve(std::min<size_t>(budget * 2u, 30000u));
+
+  const uint32_t pack_seed = grass_math::mix_hash(
+      static_cast<uint32_t>(std::hash<std::string>{}(pack.name)));
+  const float draw_radius = std::max(30.0f, pack.settings.draw_distance_m);
+  const float dense_radius = std::min(
+      draw_radius,
+      std::clamp(pack.settings.tile_size_m *
+                     std::sqrt(static_cast<float>(budget) / grass_math::pi) * 1.35f,
+                 180.0f, 300.0f));
+
+  auto emit_pass = [&](float radius, float inner_radius, float spacing_multiplier,
+                       uint32_t tier) {
+    const float radius2 = radius * radius;
+    const float inner2 = inner_radius * inner_radius;
+
+    for (size_t area_index = 0; area_index < pack.local_areas.size(); ++area_index) {
+      const auto& area = pack.local_areas[area_index];
+      if (area.outer.size() < 3) continue;
+
+      const float density = std::clamp(pack.areas[area_index].density, 0.03f, 1.0f);
+      const float base_spacing = pack.settings.tile_size_m /
+                                 std::sqrt(std::max(0.03f, density));
+      const float spacing = std::max(0.35f, base_spacing * spacing_multiplier);
+      const int ix0 = static_cast<int>(std::floor((camera_x - radius) / spacing));
+      const int ix1 = static_cast<int>(std::ceil((camera_x + radius) / spacing));
+      const int iz0 = static_cast<int>(std::floor((camera_z - radius) / spacing));
+      const int iz1 = static_cast<int>(std::ceil((camera_z + radius) / spacing));
+
+      const uint32_t area_seed = pack_seed ^
+          static_cast<uint32_t>(area_index + 1) * 2654435761u ^
+          tier * 2246822519u;
+
+      for (int iz = iz0; iz <= iz1; ++iz) {
+        for (int ix = ix0; ix <= ix1; ++ix) {
+          uint32_t seed = area_seed ^
+                          static_cast<uint32_t>(ix) * 73856093u ^
+                          static_cast<uint32_t>(iz) * 19349663u;
+          const float jitter_x = (grass_math::hash01(seed) - 0.5f) * spacing * 0.58f;
+          const float jitter_z = (grass_math::hash01(seed ^ 0x9e3779b9u) - 0.5f) * spacing * 0.58f;
+          const grass_math::Point2 p{ix * spacing + jitter_x, iz * spacing + jitter_z};
+          const float d2 = distance2(p.x, p.z, camera_x, camera_z);
+          if (d2 > radius2 || d2 < inner2) continue;
+          if (!grass_math::point_in_area_margin(p, area.outer, area.holes,
+                                                pack.settings.boundary_margin_m))
+            continue;
+          if (pack.settings.scatter_mode == "clustered" &&
+              !grass_math::clustered_keep(
+                  p, pack.settings.cluster_spacing_m, pack.settings.cluster_radius_m,
+                  pack.settings.cluster_probability,
+                  area_seed ^ 0x85ebca6bu))
+            continue;
+
+          Tile tile;
+          tile.x = p.x;
+          tile.z = p.z;
+          tile.heading = grass_math::hash01(seed ^ 0xa5a5a5a5u) * 360.0f;
+          tile.phase = grass_math::hash01(seed ^ 0x36ef3720u) * grass_math::pi * 2.0f;
+          tile.model_variant = static_cast<size_t>(
+              grass_math::mix_hash(seed ^ 0x6c8e9cf5u)) %
+              std::max<size_t>(1, pack.objects.size());
+          tile.stream_key = stream_candidate_key(area_index, ix, iz, tier);
+          candidates.push_back({std::move(tile), d2});
+        }
+      }
+    }
+  };
+
+  // Dense, deterministic grass immediately around the camera. This is the
+  // important visual region and retains the original WED density/grid scale.
+  emit_pass(dense_radius, 0.0f, 1.0f, 1u);
+
+  // If the dense area does not use the full candidate budget (camera on apron,
+  // holes, narrow strips, etc.), add a cheaper coarse ring out to the configured
+  // draw distance. This keeps distant grass present without a huge CPU scan.
+  if (candidates.size() < budget && draw_radius > dense_radius + 1.0f)
+    emit_pass(draw_radius, dense_radius * 0.90f, 4.0f, 2u);
+
+  if (candidates.size() > budget) {
+    std::nth_element(candidates.begin(), candidates.begin() + budget, candidates.end(),
+                     [](const StreamCandidate& a, const StreamCandidate& b) {
+                       return a.d2 < b.d2;
+                     });
+    candidates.resize(budget);
+  }
+
+  // Preserve overlapping streamed tiles, including their XPLM instance,
+  // terrain height and animation phase. Only tiles entering/leaving the moving
+  // window are created/destroyed, which avoids visible mass popping.
+  std::unordered_map<uint64_t, Tile> old_tiles;
+  old_tiles.reserve(pack.tiles.size() * 2u + 1u);
+  for (auto& tile : pack.tiles) {
+    if (!tile.stream_key) {
+      if (tile.instance) XPLMDestroyInstance(tile.instance);
+      continue;
+    }
+    auto [it, inserted] = old_tiles.emplace(tile.stream_key, std::move(tile));
+    if (!inserted && tile.instance) XPLMDestroyInstance(tile.instance);
+  }
+
+  std::vector<Tile> next_tiles;
+  next_tiles.reserve(candidates.size());
+  for (auto& candidate : candidates) {
+    auto it = old_tiles.find(candidate.tile.stream_key);
+    if (it != old_tiles.end()) {
+      Tile reused = std::move(it->second);
+      old_tiles.erase(it);
+      reused.x = candidate.tile.x;
+      reused.z = candidate.tile.z;
+      reused.heading = candidate.tile.heading;
+      reused.phase = candidate.tile.phase;
+      reused.model_variant = candidate.tile.model_variant;
+      reused.stream_key = candidate.tile.stream_key;
+      reused.active_epoch = 0;
+      next_tiles.push_back(std::move(reused));
+    } else {
+      next_tiles.push_back(std::move(candidate.tile));
+    }
+  }
+
+  for (auto& [key, tile] : old_tiles) {
+    (void)key;
+    if (tile.instance) XPLMDestroyInstance(tile.instance);
+  }
+
+  pack.tiles.swap(next_tiles);
+  pack.spatial_bins.clear();
+  pack.active_indices.clear();
+  pack.active_indices.reserve(static_cast<size_t>(pack.settings.max_active_tiles));
+  for (size_t i = 0; i < pack.tiles.size(); ++i)
+    if (pack.tiles[i].instance) pack.active_indices.push_back(i);
+  pack.active_epoch = 1;
+  pack.stream_center_x = camera_x;
+  pack.stream_center_z = camera_z;
+  pack.stream_initialized = true;
+  ++pack.stream_rebuild_count;
+
+  ensure_spatial_index(pack);
+  if (first_stream) {
+    log("Dynamic grass streaming ready for " + pack.name + ": up to " +
+        std::to_string(budget) + " camera-local candidate(s), recenter " +
+        std::to_string(static_cast<int>(recenter)) + " m");
+  }
 }
 
 void Runtime::refresh_active_set_fast(Pack& pack, float camera_x, float camera_z) {
@@ -172,7 +357,6 @@ void Runtime::update_live_fast(float elapsed_seconds, float aircraft_heading_deg
   }
 
   for (auto& pack : packs_) {
-    ensure_spatial_index(pack);
     const float hide_m = pack.settings.hide_aircraft_agl_ft * 0.3048f;
     if (pack.settings.hide_aircraft_agl_ft > 0.0f && aircraft_agl_m >= hide_m) {
       if (!pack.altitude_suspended) {
@@ -194,6 +378,7 @@ void Runtime::update_live_fast(float elapsed_seconds, float aircraft_heading_deg
     pack.animation_clock += elapsed;
     if (pack.refresh_clock >= pack.settings.refresh_interval_s) {
       pack.refresh_clock = 0.0f;
+      rebuild_stream_window(pack, camera_x, camera_z);
       refresh_active_set_fast(pack, camera_x, camera_z);
     }
     if (pack.animation_clock < pack.settings.animation_interval_s) continue;
@@ -205,7 +390,7 @@ void Runtime::update_live_fast(float elapsed_seconds, float aircraft_heading_deg
                                       pack.settings.weather_wind,
                                       &cached_wind_speed_mps_);
 
-    // Animation is now O(active grass), not O(all candidates).
+    // Animation is O(active grass), not O(all candidates).
     for (const size_t index : pack.active_indices) {
       if (index >= pack.tiles.size()) continue;
       auto& tile = pack.tiles[index];
