@@ -1,4 +1,4 @@
-OAFISH GRASS RUNTIME v0.2.0 - START HERE
+OAFISH GRASS RUNTIME v0.2.2 - START HERE
 ========================================
 
 1) BUILD/DOWNLOAD the plugin from GitHub Releases.
@@ -21,20 +21,27 @@ OAFISH GRASS RUNTIME v0.2.0 - START HERE
    - Save and Export Scenery Pack
 
 5) START X-PLANE.
-   OGR v0.2 reads the exported uncompressed WED DSF automatically.
+   OGR reads the exported uncompressed WED DSF automatically.
    BUILD_GRASS_AREAS.cmd is NOT required for the normal workflow.
 
-6) AFTER EDITING WED:
+6) LARGE AREAS / v0.2.2:
+   - Candidate grass now follows the camera automatically
+   - Default candidate budget: 10000
+   - Active XPLM instances remain capped at 1600
+   - You can map a much larger grass polygon without using all candidates at
+     only one edge of the airport
+
+7) AFTER EDITING WED:
    - Save and Export Scenery Pack again
    - Then restart X-Plane, or use:
      Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas
 
-7) FALLBACK ONLY:
+8) FALLBACK ONLY:
    If Log.txt says the DSF is compressed/unsupported, run:
    OafishGrass\BUILD_GRASS_AREAS.cmd
    OGR preserves the legacy ogr_areas.json when direct DSF parsing cannot be used.
 
-8) REPLAY:
+9) REPLAY:
    - Fly/taxi normally first so OGR records history
    - Prop RPM / jet power / weather wind are recorded at 20 Hz
    - Enter X-Plane Replay and scrub inside the recorded window
@@ -50,6 +57,7 @@ DEFAULTS:
 - Jet N1/thrust wash: ON
 - Replay-aware engine/wind history: ON
 - Max active grass: 1600
+- Max streamed candidates: 10000
 - No shadow / no black grass cards retained
 
 IMPORTANT:
