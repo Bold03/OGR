@@ -1,10 +1,10 @@
-# Oafish Grass Runtime (OGR) v0.1.0
+# Oafish Grass Runtime (OGR) v0.1.1
 
 Standalone WED-authored animated grass runtime for X-Plane 11/12.
 
 OGR is deliberately separate from SSA. WED is responsible for authoring the grass area; the OGR plugin is responsible for drawing and animating the real grass instances.
 
-## What v0.1 keeps from SSA Grass
+## What OGR keeps from SSA Grass
 
 - X-Plane weather wind direction and speed
 - actual propeller RPM + thrust response for prop aircraft
@@ -19,6 +19,20 @@ OGR is deliberately separate from SSA. WED is responsible for authoring the gras
 - no-shadow OBJ assets
 - upward normals to avoid black grass cards
 - strict WED polygon edge margin so the ~2.6 m grass cards do not spill onto asphalt
+
+## New in v0.1.1: replay-aware grass effects
+
+OGR now records a lightweight 20 Hz history of the environmental inputs that matter to grass animation. The recorder keeps up to 20 minutes of:
+
+- per-engine wash power and RPM ratio
+- engine position relative to the aircraft
+- reverse/forward wake heading
+- weather wind vector
+- aircraft transform used to align replay samples
+
+When `sim/time/is_in_replay` becomes active, OGR stops depending on the live engine state for the final grass bend and selects the matching historical sample using X-Plane's replay time. This lets Cessna prop wash, jet/N1 blast and weather wind remain visible while the player watches or scrubs a replay. If the replay is moved outside OGR's recorded history window, the effect is deliberately neutral instead of applying stale wash to unrelated footage.
+
+The replay recorder stores engine state, not every grass blade, so the memory/CPU cost stays small enough for older systems.
 
 ## WED workflow
 
@@ -73,6 +87,7 @@ The default profile is deliberately conservative for older iGPU systems:
 - camera active-set refresh every `0.35 s`
 - far grass stops receiving animation updates
 - above the configured aircraft AGL cutoff, instances are destroyed only once and stay suspended until descent
+- replay history records environment/engine inputs at 20 Hz rather than storing per-grass animation state
 
 ## Build
 
@@ -87,8 +102,9 @@ python tests/test_wed_extract.py
 
 The included GitHub Actions workflow builds Windows and publishes the ZIP directly to **GitHub Releases**, so it does not use Actions artifact storage.
 
-## v0.1 limitations
+## Current limitations
 
 - One distinct OGR `.for` resource per scenery pack. You may draw as many WED forest polygons/holes with that resource as needed.
 - Run `BUILD_GRASS_AREAS.cmd` after changing WED grass polygons.
+- Replay effects are available only inside OGR's current in-memory history window (up to 20 minutes).
 - This is a new standalone runtime; test it in a copy of the scenery before distribution.
