@@ -44,7 +44,7 @@ struct Settings {
   float engine_wash_half_angle_deg{18.0f};
   float engine_wash_base_half_width_m{2.5f};
   int max_active_tiles{1600};
-  int max_total_tiles{8000};
+  int max_total_tiles{10000};
   float refresh_interval_s{0.35f};
   float animation_interval_s{0.05f};
   float hide_aircraft_agl_ft{3000.0f};
@@ -83,6 +83,7 @@ private:
     float phase{};
     grass_math::MotionPhase motion{};
     size_t model_variant{};
+    uint64_t stream_key{};
     uint32_t active_epoch{};
     bool positioned_once{};
     bool animated_last{};
@@ -107,6 +108,16 @@ private:
     std::vector<size_t> active_indices;
     float spatial_cell_m{128.0f};
     uint32_t active_epoch{1};
+    bool spatial_log_done{};
+
+    // v0.2.2: the candidate window follows the camera. This removes the old
+    // failure mode where a huge WED polygon consumed the global candidate cap
+    // at one edge of the airport and left distant parts with no OGR grass.
+    float stream_center_x{};
+    float stream_center_z{};
+    float stream_recenter_m{60.0f};
+    uint32_t stream_rebuild_count{};
+    bool stream_initialized{};
 
     float refresh_clock{};
     float animation_clock{};
@@ -119,11 +130,12 @@ private:
 
   // The original v0.1 update loop is compiled as update_live(). The public
   // update() wrapper adds replay recording/playback while reusing stable
-  // geometry/terrain code. v0.2.1 routes hot-path culling/animation through
-  // spatial bins so large candidate sets do not cost a full scan each tick.
+  // geometry/terrain code. v0.2.1 introduced spatial bins; v0.2.2 adds a
+  // deterministic camera-centered candidate streaming window for huge areas.
   void update_live(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void update_live_fast(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void ensure_spatial_index(Pack& pack);
+  void rebuild_stream_window(Pack& pack, float camera_x, float camera_z);
   void refresh_active_set_fast(Pack& pack, float camera_x, float camera_z);
 
   void load_datarefs();
