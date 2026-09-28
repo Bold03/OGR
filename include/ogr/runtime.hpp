@@ -2,6 +2,7 @@
 
 #include "ogr/grass_math.hpp"
 #include "ogr/grass_motion.hpp"
+#include "ogr/replay.hpp"
 #include <XPLMCamera.h>
 #include <XPLMDataAccess.h>
 #include <XPLMInstance.h>
@@ -104,6 +105,11 @@ private:
     float x{}, y{}, z{}, heading{}, power{}, rpm_ratio{};
   };
 
+  // The original v0.1 update loop is compiled as update_live(). The public
+  // update() wrapper adds replay recording/playback while reusing the stable
+  // culling, terrain probing and grass animation path.
+  void update_live(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
+
   void load_datarefs();
   std::vector<std::filesystem::path> active_scenery_roots() const;
   bool load_pack(const std::filesystem::path& scenery_root,
@@ -120,6 +126,14 @@ private:
   grass_math::Vector2 ambient_wind_world(float wind_strength, float full_bend_kt,
                                          bool enabled, float* speed_mps) const;
   void log(const std::string& text) const;
+
+  void ensure_replay_datarefs();
+  void record_replay_frame(float aircraft_x, float aircraft_y, float aircraft_z,
+                           float aircraft_heading_deg);
+  bool apply_replay_frame(float aircraft_x, float aircraft_y, float aircraft_z,
+                          float aircraft_heading_deg);
+  grass_math::Vector2 replay_wind_world(const Settings& settings,
+                                        float* speed_mps) const;
 
   std::filesystem::path xplane_root_;
   std::vector<Pack> packs_;
@@ -146,6 +160,17 @@ private:
   XPLMDataRef engine_x_ref_{};
   XPLMDataRef engine_y_ref_{};
   XPLMDataRef engine_z_ref_{};
+
+  XPLMDataRef replay_ref_{};
+  XPLMDataRef running_time_ref_{};
+  XPLMDataRef flight_time_ref_{};
+  bool replay_refs_initialized_{};
+  bool replay_active_{};
+  bool replay_sample_missing_logged_{};
+  float replay_record_clock_{};
+  float replay_wind_x_mps_{};
+  float replay_wind_z_mps_{};
+  ReplayHistory replay_history_{1200.0f, 24000};
 
   std::array<EngineWake, 16> engine_wakes_{};
   grass_math::Vector2 cached_wind_{};
