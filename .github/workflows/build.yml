@@ -39,9 +39,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force package/OafishGrassRuntime/win_x64 | Out-Null
           New-Item -ItemType Directory -Force package/WED-Starter | Out-Null
-          $xpl = Get-ChildItem -Recurse build -Filter OafishGrass.xpl | Select-Object -First 1
-          if (-not $xpl) { throw "OafishGrass.xpl not found" }
-          Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrass.xpl
+          $xpl = Get-ChildItem -Recurse build -Filter OafishGrassRuntime.xpl | Select-Object -First 1
+          if (-not $xpl) { throw "OafishGrassRuntime.xpl not found" }
+          Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl
           Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
           Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
           Compress-Archive -Path package/* -DestinationPath "OGR-v0.1.0-win_x64-build-${{ github.run_number }}.zip" -Force
