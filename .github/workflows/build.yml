@@ -2,6 +2,9 @@ name: Build Oafish Grass Runtime
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags: [ "v*", "ogr-v*" ]
 
 permissions:
   contents: write
@@ -25,10 +28,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Test C++ grass core and replay history
+      - name: Test grass, replay and direct DSF parser
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Test WED area exporter
+      - name: Test WED area exporter fallback
         run: python tests/test_wed_extract.py
 
       - name: Stage package
@@ -41,15 +44,15 @@ jobs:
           Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl
           Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
           Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.1.1-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.2.0-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.1.1-build-${{ github.run_number }}"
+          TAG="ogr-v0.2.0-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.1.1-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.1.1 Windows Build #${{ github.run_number }}" \
-            --notes "Replay-aware Windows build: recorded prop RPM / jet power / engine wash and weather wind are restored while viewing X-Plane replay. Published directly to Releases; Actions artifact storage is not used."
+            "OGR-v0.2.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.2.0 Windows Build #${{ github.run_number }}" \
+            --notes "Direct-WED-DSF build: OGR reads exported uncompressed WED forest DSFs automatically, so BUILD_GRASS_AREAS.cmd is no longer required for normal WED scenery. Replay-aware RPM/N1 wash and wind retained."
