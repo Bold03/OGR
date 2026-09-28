@@ -1,10 +1,10 @@
-OAFISH GRASS RUNTIME v0.1.0 - START HERE
+OAFISH GRASS RUNTIME v0.1.1 - START HERE
 ========================================
 
-1) BUILD the plugin from this source (GitHub Actions is already included).
+1) BUILD/DOWNLOAD the plugin from GitHub Releases.
 
 2) INSTALL:
-   X-Plane 11\Resources\plugins\OafishGrassRuntime\win_x64\OafishGrass.xpl
+   X-Plane 11\Resources\plugins\OafishGrassRuntime\win_x64\OafishGrassRuntime.xpl
 
 3) COPY this folder into your scenery:
    release\WED-Starter\OafishGrass
@@ -32,6 +32,13 @@ OAFISH GRASS RUNTIME v0.1.0 - START HERE
    Run BUILD_GRASS_AREAS.cmd again, then use:
    Plugins > Oafish Grass Runtime > Reload WED grass areas
 
+8) REPLAY TEST (v0.1.1):
+   - Fly/taxi normally first so OGR can record history.
+   - Prop RPM / jet power / weather wind are recorded at 20 Hz.
+   - Enter X-Plane Replay and scrub within the recorded window.
+   - Grass should react using the recorded engine wash and wind instead of the live engine state.
+   - OGR keeps up to 20 minutes of replay history in memory.
+
 DEFAULTS:
 - Draw/OBJ LOD: 914.4 m = 3000 ft
 - Animated ring: 600 m
@@ -39,6 +46,7 @@ DEFAULTS:
 - Weather wind: ON
 - Prop RPM/thrust wash: ON
 - Jet N1/thrust wash: ON
+- Replay-aware engine/wind history: ON
 - Max active grass: 1600
 - No shadow / no black grass cards retained
 
