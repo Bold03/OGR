@@ -8,8 +8,10 @@
 #include <XPLMInstance.h>
 #include <XPLMScenery.h>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ogr {
@@ -81,6 +83,7 @@ private:
     float phase{};
     grass_math::MotionPhase motion{};
     size_t model_variant{};
+    uint32_t active_epoch{};
     bool positioned_once{};
     bool animated_last{};
     XPLMInstanceRef instance{};
@@ -96,6 +99,15 @@ private:
     std::vector<Area> areas;
     std::vector<LocalArea> local_areas;
     std::vector<Tile> tiles;
+
+    // Candidate grass can be numerous, but only a small camera-local subset is
+    // active. Spatial bins avoid scanning every candidate on each refresh and
+    // active_indices avoids scanning inactive tiles on each animation tick.
+    std::unordered_map<uint64_t, std::vector<size_t>> spatial_bins;
+    std::vector<size_t> active_indices;
+    float spatial_cell_m{128.0f};
+    uint32_t active_epoch{1};
+
     float refresh_clock{};
     float animation_clock{};
     bool altitude_suspended{};
