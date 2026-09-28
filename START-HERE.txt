@@ -1,4 +1,4 @@
-OAFISH GRASS RUNTIME v0.1.1 - START HERE
+OAFISH GRASS RUNTIME v0.2.0 - START HERE
 ========================================
 
 1) BUILD/DOWNLOAD the plugin from GitHub Releases.
@@ -9,7 +9,7 @@ OAFISH GRASS RUNTIME v0.1.1 - START HERE
 3) COPY this folder into your scenery:
    release\WED-Starter\OafishGrass
 
-   Example result:
+   Example:
    X-Plane 11\Custom Scenery\WIDN Tanjung Pinang\OafishGrass\ogr_grass.for
 
 4) IN WED:
@@ -18,26 +18,28 @@ OAFISH GRASS RUNTIME v0.1.1 - START HERE
    - Draw the grass polygon exactly where grass is allowed
    - Holes are supported
    - Set WED Density as desired
-   - Save WED and Export Scenery Pack
+   - Save and Export Scenery Pack
 
-5) DOUBLE CLICK:
+5) START X-PLANE.
+   OGR v0.2 reads the exported uncompressed WED DSF automatically.
+   BUILD_GRASS_AREAS.cmd is NOT required for the normal workflow.
+
+6) AFTER EDITING WED:
+   - Save and Export Scenery Pack again
+   - Then restart X-Plane, or use:
+     Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas
+
+7) FALLBACK ONLY:
+   If Log.txt says the DSF is compressed/unsupported, run:
    OafishGrass\BUILD_GRASS_AREAS.cmd
+   OGR preserves the legacy ogr_areas.json when direct DSF parsing cannot be used.
 
-   It converts earth.wed.xml -> OafishGrass\ogr_areas.json.
-
-6) START X-PLANE.
-   OGR scans active Custom Scenery packs and loads their ogr_areas.json.
-
-7) AFTER EDITING WED:
-   Run BUILD_GRASS_AREAS.cmd again, then use:
-   Plugins > Oafish Grass Runtime > Reload WED grass areas
-
-8) REPLAY TEST (v0.1.1):
-   - Fly/taxi normally first so OGR can record history.
-   - Prop RPM / jet power / weather wind are recorded at 20 Hz.
-   - Enter X-Plane Replay and scrub within the recorded window.
-   - Grass should react using the recorded engine wash and wind instead of the live engine state.
-   - OGR keeps up to 20 minutes of replay history in memory.
+8) REPLAY:
+   - Fly/taxi normally first so OGR records history
+   - Prop RPM / jet power / weather wind are recorded at 20 Hz
+   - Enter X-Plane Replay and scrub inside the recorded window
+   - Grass uses recorded prop wash / jet blast / wind
+   - History window is up to about 20 minutes
 
 DEFAULTS:
 - Draw/OBJ LOD: 914.4 m = 3000 ft
@@ -51,5 +53,5 @@ DEFAULTS:
 - No shadow / no black grass cards retained
 
 IMPORTANT:
-The .for file is used for WED authoring and OGR metadata. The standalone OGR
-plugin draws the real grass. SSA is not required for grass anymore.
+The .for file is used for WED authoring and OGR metadata. OGR reads Area forest
+polygons from the exported DSF and draws the real grass. SSA is not required.
