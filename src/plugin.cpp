@@ -1,4 +1,5 @@
 #include "ogr/datarefs.hpp"
+#include "ogr/dsf_bridge.hpp"
 #include "ogr/runtime.hpp"
 
 #include <XPLMMenus.h>
@@ -18,6 +19,7 @@ XPLMDataRef agl_ref{};
 XPLMMenuID menu{};
 int menu_item{-1};
 bool flightloop_registered{};
+std::string xplane_root;
 
 float flightloop(float elapsed_since_last_call, float, int, void*) {
   if (!runtime) return -1.0f;
@@ -27,9 +29,19 @@ float flightloop(float elapsed_since_last_call, float, int, void*) {
   return -1.0f;
 }
 
+void refresh_direct_dsf() {
+  if (xplane_root.empty()) return;
+  const auto stats = ogr::refresh_direct_dsf_areas(xplane_root);
+  for (const auto& text : stats.messages) {
+    const std::string line = "[OGR] " + text + "\n";
+    XPLMDebugString(line.c_str());
+  }
+}
+
 void menu_handler(void*, void* item_ref) {
   if (!runtime || item_ref != reinterpret_cast<void*>(1)) return;
   XPLMDebugString("[OGR] Manual reload requested\n");
+  refresh_direct_dsf();
   runtime->reload();
 }
 
@@ -37,7 +49,7 @@ void create_menu() {
   const int plugins_item = XPLMAppendMenuItem(XPLMFindPluginsMenu(), "Oafish Grass Runtime", nullptr, 1);
   menu = XPLMCreateMenu("Oafish Grass Runtime", XPLMFindPluginsMenu(), plugins_item,
                         menu_handler, nullptr);
-  if (menu) menu_item = XPLMAppendMenuItem(menu, "Reload WED grass areas", reinterpret_cast<void*>(1), 1);
+  if (menu) menu_item = XPLMAppendMenuItem(menu, "Reload WED/DSF grass areas", reinterpret_cast<void*>(1), 1);
 }
 
 void destroy_menu() {
@@ -64,6 +76,8 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
 
     char root[2048]{};
     XPLMGetSystemPath(root);
+    xplane_root = root;
+    refresh_direct_dsf();
     runtime = std::make_unique<ogr::Runtime>();
     runtime->load_all(root);
     create_menu();
@@ -84,6 +98,7 @@ PLUGIN_API void XPluginStop(void) {
   }
   destroy_menu();
   runtime.reset();
+  xplane_root.clear();
   refs.clear();
 }
 
@@ -105,7 +120,8 @@ PLUGIN_API void XPluginDisable(void) {
 PLUGIN_API void XPluginReceiveMessage(XPLMPluginID from, int message, void*) {
   if (!runtime) return;
   if (from == XPLM_PLUGIN_XPLANE && message == XPLM_MSG_SCENERY_LOADED) {
-    XPLMDebugString("[OGR] X-Plane scenery reload detected; rebuilding grass coordinates\n");
+    XPLMDebugString("[OGR] X-Plane scenery reload detected; refreshing direct DSF grass areas\n");
+    refresh_direct_dsf();
     runtime->reload();
   }
 }
