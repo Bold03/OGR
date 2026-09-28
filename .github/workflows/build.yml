@@ -44,15 +44,15 @@ jobs:
           Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl
           Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
           Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.2.1-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.2.2-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.2.1-build-${{ github.run_number }}"
+          TAG="ogr-v0.2.2-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.2.1-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.2.1 Windows Build #${{ github.run_number }}" \
-            --notes "Large-area optimization build: spatial grass bins remove full candidate scans from recurring camera refreshes, animation/replay iterate only active grass, while Direct WED DSF parsing and replay-aware RPM/N1 wash remain enabled."
+            "OGR-v0.2.2-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.2.2 Windows Build #${{ github.run_number }}" \
+            --notes "Dynamic-streaming build: default candidate budget raised to 10,000; grass candidates now follow the camera across huge WED areas while preserving spatial bins, active-only animation, Direct WED DSF parsing, and replay-aware RPM/N1 wash + wind."
