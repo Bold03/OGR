@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(OafishGrassRuntime VERSION 0.1.0 LANGUAGES CXX)
+project(OafishGrassRuntime VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,7 +16,7 @@ FetchContent_MakeAvailable(json)
 add_library(OafishGrass SHARED
   src/plugin.cpp
   src/datarefs.cpp
-  src/runtime.cpp
+  src/runtime_replay.cpp
 )
 
 target_include_directories(OafishGrass PRIVATE
@@ -26,8 +26,6 @@ target_include_directories(OafishGrass PRIVATE
 )
 target_link_libraries(OafishGrass PRIVATE nlohmann_json::nlohmann_json)
 target_compile_definitions(OafishGrass PRIVATE XPLM303 XPLM301 XPLM300 XPLM210 XPLM200)
-# XPLM 3.0 package layout expects the binary name to match the plugin package
-# name: OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl.
 set_target_properties(OafishGrass PROPERTIES
   PREFIX ""
   SUFFIX ".xpl"
@@ -54,11 +52,16 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
   add_executable(ogr_grass_math_test tests/grass_math_test.cpp)
+  add_executable(ogr_replay_test tests/replay_test.cpp)
   target_include_directories(ogr_grass_math_test PRIVATE include)
+  target_include_directories(ogr_replay_test PRIVATE include)
   if(MSVC)
     target_compile_options(ogr_grass_math_test PRIVATE /W4 /EHsc /utf-8)
+    target_compile_options(ogr_replay_test PRIVATE /W4 /EHsc /utf-8)
   else()
     target_compile_options(ogr_grass_math_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(ogr_replay_test PRIVATE -Wall -Wextra -Wpedantic)
   endif()
   add_test(NAME ogr_grass_geometry_and_engine_wash COMMAND ogr_grass_math_test)
+  add_test(NAME ogr_replay_history COMMAND ogr_replay_test)
 endif()
