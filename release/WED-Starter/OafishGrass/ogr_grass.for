@@ -14,7 +14,7 @@ RANDOM 0 0
 TREE 0 0 1 1 0.5 100 0.01 0.01 1 0 OGR_marker
 
 # Oafish Grass Runtime extension metadata. X-Plane/WED ignore these comments;
-# OGR's WED exporter reads them.
+# OGR reads them from the scenery resource.
 #OGR_VERSION 1
 #OGR_MODEL grass_A.obj
 #OGR_MODEL grass_B.obj
@@ -33,7 +33,7 @@ TREE 0 0 1 1 0.5 100 0.01 0.01 1 0 OGR_marker
 #OGR_ENGINE_WASH_HALF_ANGLE_DEG 18.0
 #OGR_ENGINE_WASH_BASE_HALF_WIDTH_M 2.5
 #OGR_MAX_ACTIVE_TILES 1600
-#OGR_MAX_TOTAL_TILES 8000
+#OGR_MAX_TOTAL_TILES 10000
 #OGR_REFRESH_INTERVAL_S 0.35
 #OGR_ANIMATION_INTERVAL_S 0.05
 #OGR_HIDE_AIRCRAFT_AGL_FT 3000
