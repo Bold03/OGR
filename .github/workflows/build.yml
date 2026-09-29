@@ -2,6 +2,9 @@ name: Build Oafish Grass Runtime
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags: [ "v*", "ogr-v*" ]
 
 permissions:
   contents: write
@@ -25,7 +28,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Test grass, replay, traffic and direct DSF parser
+      - name: Test grass, replay, traffic, LOD and direct DSF parser
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Test WED area exporter fallback
@@ -54,15 +57,27 @@ jobs:
           Copy-Item release/WED-Starter/OafishGrass/grass_atlas.png package/OafishGrass_Library/OafishGrass/grass_atlas.png
           Copy-Item release/WED-Starter/OafishGrass/ogr_marker.png package/OafishGrass_Library/OafishGrass/ogr_marker.png
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.4.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          # The Blender-exported OBJ files carried the old 914.4 m gate. v0.5
+          # keeps runtime instance count capped, but allows the selected sparse
+          # far-ring instances to remain visible through the 2 km runtime LOD.
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          $lodObjects = Get-ChildItem package -Recurse -Filter "grass_*.obj"
+          foreach ($obj in $lodObjects) {
+            $text = [IO.File]::ReadAllText($obj.FullName)
+            $patched = [regex]::Replace($text, 'ATTR_LOD\s+0\s+914\.4', "ATTR_LOD`t0`t2050")
+            if ($patched -eq $text) { throw "Expected 914.4 m ATTR_LOD not found in $($obj.FullName)" }
+            [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
+          }
+
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.5.0-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.4.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.5.0-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.4.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.4.0 Windows Build #${{ github.run_number }}" \
-            --notes "Online-traffic interaction build: OGR reads X-Plane 11.50+ TCAS targets published by IVAO/VATSIM/traffic plugins, estimates conservative prop/jet wake from ICAO type, throttle and ground speed, and lets nearby online traffic disturb grass. Read-only TCAS integration; OGR does not acquire or override traffic. Shared library, dynamic streaming, 10,000 candidate budget, Direct DSF parsing, replay-aware user-aircraft RPM/N1 wash and weather wind remain enabled."
+            "OGR-v0.5.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.5.0 Windows Build #${{ github.run_number }}" \
+            --notes "2 km LOD build: OGR now reserves the fixed active-instance budget across three distance stages instead of spending it all near the camera. Near grass stays dense/animated, the mid ring is cheaper/static, and the far ring is sparse out to 2,000 m with deterministic density cross-fades to reduce popping. Packaged grass OBJ ATTR_LOD is extended from 914.4 m to 2050 m. Shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware user RPM/N1 wash, weather wind and TCAS/IVAO/VATSIM traffic interaction remain enabled."
