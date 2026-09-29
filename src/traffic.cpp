@@ -64,124 +64,155 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
   ensure_traffic_datarefs();
 
   int target_cap = 0;
+  float update_interval = 0.10f;
+  float strength = 0.0f;
   bool enabled = false;
   for (const auto& pack : packs_) {
     if (!pack.settings.traffic_wash) continue;
     enabled = true;
     target_cap = std::max(target_cap, pack.settings.max_traffic_targets);
+    update_interval = std::min(update_interval, pack.settings.traffic_update_interval_s);
+    strength = std::max(strength, pack.settings.traffic_wash_strength);
   }
   target_cap = std::clamp(target_cap, 0, static_cast<int>(traffic_wakes_.size()));
+  update_interval = std::clamp(update_interval, 0.05f, 0.50f);
+
+  const int user_engine_count = engine_count_ref_ ?
+      std::clamp(XPLMGetDatai(engine_count_ref_), 0, static_cast<int>(engine_wakes_.size())) : 0;
+
   if (!enabled || !traffic_refs_available_ || target_cap <= 0) {
     traffic_wakes_ = {};
     return;
   }
 
-  std::array<int, kTcasSlots> ids{};
-  std::array<int, kTcasSlots> wow{};
-  std::array<float, kTcasSlots> x{}, y{}, z{}, vx{}, vy{}, vz{}, psi{}, throttle{};
-  std::array<char, kTcasSlots * kTypeBytesPerSlot> types{};
+  traffic_clock_ += std::max(0.0f, dt);
+  const bool refresh = traffic_clock_ >= update_interval;
+  if (refresh) {
+    const float sample_dt = traffic_clock_;
+    traffic_clock_ = std::fmod(traffic_clock_, update_interval);
 
-  const int id_count = XPLMGetDatavi(traffic_mode_s_ref_, ids.data(), 0, kTcasSlots);
-  if (id_count <= 1) {
-    traffic_wakes_ = {};
-    return;
-  }
+    std::array<int, kTcasSlots> ids{};
+    std::array<int, kTcasSlots> wow{};
+    std::array<float, kTcasSlots> x{}, y{}, z{}, vx{}, vy{}, vz{}, psi{}, throttle{};
+    std::array<char, kTcasSlots * kTypeBytesPerSlot> types{};
 
-  XPLMGetDatavf(traffic_x_ref_, x.data(), 0, kTcasSlots);
-  XPLMGetDatavf(traffic_y_ref_, y.data(), 0, kTcasSlots);
-  XPLMGetDatavf(traffic_z_ref_, z.data(), 0, kTcasSlots);
-  if (traffic_vx_ref_) XPLMGetDatavf(traffic_vx_ref_, vx.data(), 0, kTcasSlots);
-  if (traffic_vy_ref_) XPLMGetDatavf(traffic_vy_ref_, vy.data(), 0, kTcasSlots);
-  if (traffic_vz_ref_) XPLMGetDatavf(traffic_vz_ref_, vz.data(), 0, kTcasSlots);
-  if (traffic_psi_ref_) XPLMGetDatavf(traffic_psi_ref_, psi.data(), 0, kTcasSlots);
-  if (traffic_throttle_ref_) XPLMGetDatavf(traffic_throttle_ref_, throttle.data(), 0, kTcasSlots);
-  if (traffic_wow_ref_) XPLMGetDatavi(traffic_wow_ref_, wow.data(), 0, kTcasSlots);
-  if (traffic_icao_type_ref_)
-    XPLMGetDatab(traffic_icao_type_ref_, types.data(), 0, static_cast<int>(types.size()));
+    const int id_count = XPLMGetDatavi(traffic_mode_s_ref_, ids.data(), 0, kTcasSlots);
+    if (id_count <= 1) {
+      traffic_wakes_ = {};
+    } else {
+      XPLMGetDatavf(traffic_x_ref_, x.data(), 0, kTcasSlots);
+      XPLMGetDatavf(traffic_y_ref_, y.data(), 0, kTcasSlots);
+      XPLMGetDatavf(traffic_z_ref_, z.data(), 0, kTcasSlots);
+      if (traffic_vx_ref_) XPLMGetDatavf(traffic_vx_ref_, vx.data(), 0, kTcasSlots);
+      if (traffic_vy_ref_) XPLMGetDatavf(traffic_vy_ref_, vy.data(), 0, kTcasSlots);
+      if (traffic_vz_ref_) XPLMGetDatavf(traffic_vz_ref_, vz.data(), 0, kTcasSlots);
+      if (traffic_psi_ref_) XPLMGetDatavf(traffic_psi_ref_, psi.data(), 0, kTcasSlots);
+      if (traffic_throttle_ref_) XPLMGetDatavf(traffic_throttle_ref_, throttle.data(), 0, kTcasSlots);
+      if (traffic_wow_ref_) XPLMGetDatavi(traffic_wow_ref_, wow.data(), 0, kTcasSlots);
+      if (traffic_icao_type_ref_)
+        XPLMGetDatab(traffic_icao_type_ref_, types.data(), 0, static_cast<int>(types.size()));
 
-  float camera_x = aircraft_x;
-  float camera_z = aircraft_z;
-  XPLMCameraPosition_t camera{};
-  XPLMReadCameraPosition(&camera);
-  if (std::isfinite(camera.x) && std::isfinite(camera.z)) {
-    camera_x = camera.x;
-    camera_z = camera.z;
-  }
+      float camera_x = aircraft_x;
+      float camera_z = aircraft_z;
+      XPLMCameraPosition_t camera{};
+      XPLMReadCameraPosition(&camera);
+      if (std::isfinite(camera.x) && std::isfinite(camera.z)) {
+        camera_x = camera.x;
+        camera_z = camera.z;
+      }
 
-  struct Candidate {
-    TrafficWake wake;
-    float distance2{};
-  };
-  std::vector<Candidate> candidates;
-  candidates.reserve(static_cast<size_t>(target_cap) * 2u);
+      struct Candidate {
+        TrafficWake wake;
+        float distance2{};
+      };
+      std::vector<Candidate> candidates;
+      candidates.reserve(static_cast<size_t>(target_cap) * 2u);
 
-  const int count = std::min(id_count, kTcasSlots);
-  constexpr float kInterestRadiusM = 2600.0f;
-  constexpr float kInterestRadius2 = kInterestRadiusM * kInterestRadiusM;
+      const int count = std::min(id_count, kTcasSlots);
+      constexpr float kInterestRadiusM = 2600.0f;
+      constexpr float kInterestRadius2 = kInterestRadiusM * kInterestRadiusM;
 
-  for (int i = 1; i < count; ++i) { // slot 0 is the user aircraft
-    if (ids[i] == 0) continue;
-    if (!std::isfinite(x[i]) || !std::isfinite(y[i]) || !std::isfinite(z[i])) continue;
+      for (int i = 1; i < count; ++i) { // TCAS slot 0 is the user aircraft
+        if (ids[i] == 0) continue;
+        if (!std::isfinite(x[i]) || !std::isfinite(y[i]) || !std::isfinite(z[i])) continue;
 
-    const float d_aircraft = horizontal_distance2(x[i], z[i], aircraft_x, aircraft_z);
-    const float d_camera = horizontal_distance2(x[i], z[i], camera_x, camera_z);
-    const float d2 = std::min(d_aircraft, d_camera);
-    if (d2 > kInterestRadius2) continue;
+        const float d_aircraft = horizontal_distance2(x[i], z[i], aircraft_x, aircraft_z);
+        const float d_camera = horizontal_distance2(x[i], z[i], camera_x, camera_z);
+        const float d2 = std::min(d_aircraft, d_camera);
+        if (d2 > kInterestRadius2) continue;
 
-    std::string_view type_view;
-    if (traffic_icao_type_ref_) {
-      const char* slot = types.data() + i * kTypeBytesPerSlot;
-      type_view = std::string_view(slot, kTypeBytesPerSlot);
+        std::string_view type_view;
+        if (traffic_icao_type_ref_) {
+          const char* slot = types.data() + i * kTypeBytesPerSlot;
+          type_view = std::string_view(slot, kTypeBytesPerSlot);
+        }
+        const auto profile = traffic::profile_for_icao(type_view);
+
+        const float speed = std::hypot(finite_or(vx[i]), finite_or(vz[i]));
+        const bool on_ground = traffic_wow_ref_ ? wow[i] != 0 : std::abs(finite_or(vy[i])) < 1.5f;
+        const float target_power = traffic::estimated_power(
+            traffic_throttle_ref_ ? throttle[i] : 0.0f, speed, on_ground, profile);
+
+        TrafficWake wake;
+        wake.mode_s_id = ids[i];
+        wake.x = x[i];
+        wake.y = y[i];
+        wake.z = z[i];
+        wake.heading = traffic_psi_ref_ && std::isfinite(psi[i])
+                           ? psi[i]
+                           : heading_from_velocity(vx[i], vz[i]);
+        wake.power = target_power;
+        wake.rpm_ratio = profile.rpm_ratio;
+        wake.range_m = profile.range_m;
+        wake.half_angle_deg = profile.half_angle_deg;
+        wake.base_half_width_m = profile.base_half_width_m;
+        wake.on_ground = on_ground;
+
+        for (const auto& previous : traffic_wakes_) {
+          if (previous.mode_s_id != wake.mode_s_id) continue;
+          wake.power = grass_math::approach(previous.power, target_power, sample_dt,
+                                            target_power > previous.power ? 0.25f : 0.65f);
+          break;
+        }
+
+        if (wake.power < 0.005f && speed < 0.5f) continue;
+        candidates.push_back({wake, d2});
+      }
+
+      if (static_cast<int>(candidates.size()) > target_cap) {
+        std::nth_element(candidates.begin(), candidates.begin() + target_cap, candidates.end(),
+                         [](const Candidate& a, const Candidate& b) {
+                           return a.distance2 < b.distance2;
+                         });
+        candidates.resize(static_cast<size_t>(target_cap));
+      }
+
+      traffic_wakes_ = {};
+      for (size_t i = 0; i < candidates.size() && i < traffic_wakes_.size(); ++i)
+        traffic_wakes_[i] = candidates[i].wake;
+
+      if (!traffic_detected_logged_ && !candidates.empty()) {
+        log("TCAS traffic detected: " + std::to_string(candidates.size()) +
+            " nearby target(s) can now disturb OGR grass");
+        traffic_detected_logged_ = true;
+      }
     }
-    const auto profile = traffic::profile_for_icao(type_view);
-
-    const float speed = std::hypot(finite_or(vx[i]), finite_or(vz[i]));
-    const bool on_ground = traffic_wow_ref_ ? wow[i] != 0 : std::abs(finite_or(vy[i])) < 1.5f;
-    const float target_power = traffic::estimated_power(
-        traffic_throttle_ref_ ? throttle[i] : 0.0f, speed, on_ground, profile);
-
-    TrafficWake wake;
-    wake.mode_s_id = ids[i];
-    wake.x = x[i];
-    wake.y = y[i];
-    wake.z = z[i];
-    wake.heading = traffic_psi_ref_ && std::isfinite(psi[i])
-                       ? psi[i]
-                       : heading_from_velocity(vx[i], vz[i]);
-    wake.power = target_power;
-    wake.rpm_ratio = profile.rpm_ratio;
-    wake.range_m = profile.range_m;
-    wake.half_angle_deg = profile.half_angle_deg;
-    wake.base_half_width_m = profile.base_half_width_m;
-    wake.on_ground = on_ground;
-
-    for (const auto& previous : traffic_wakes_) {
-      if (previous.mode_s_id != wake.mode_s_id) continue;
-      wake.power = grass_math::approach(previous.power, target_power, dt,
-                                        target_power > previous.power ? 0.25f : 0.65f);
-      break;
-    }
-
-    if (wake.power < 0.005f && speed < 0.5f) continue;
-    candidates.push_back({wake, d2});
   }
 
-  if (static_cast<int>(candidates.size()) > target_cap) {
-    std::nth_element(candidates.begin(), candidates.begin() + target_cap, candidates.end(),
-                     [](const Candidate& a, const Candidate& b) {
-                       return a.distance2 < b.distance2;
-                     });
-    candidates.resize(static_cast<size_t>(target_cap));
-  }
+  // Feed cached online targets into the same proven engine-wash field used by
+  // the user aircraft. This keeps the hot grass loop unchanged and cheap.
+  int slot = user_engine_count;
+  for (const auto& traffic : traffic_wakes_) {
+    if (slot >= static_cast<int>(engine_wakes_.size())) break;
+    if (!traffic.mode_s_id || traffic.power < 0.005f) continue;
 
-  traffic_wakes_ = {};
-  for (size_t i = 0; i < candidates.size() && i < traffic_wakes_.size(); ++i)
-    traffic_wakes_[i] = candidates[i].wake;
-
-  if (!traffic_detected_logged_ && !candidates.empty()) {
-    log("TCAS traffic detected: " + std::to_string(candidates.size()) +
-        " nearby target(s) can now disturb OGR grass");
-    traffic_detected_logged_ = true;
+    auto& wake = engine_wakes_[static_cast<size_t>(slot++)];
+    wake.x = traffic.x;
+    wake.y = traffic.y;
+    wake.z = traffic.z;
+    wake.heading = traffic.heading;
+    wake.power = grass_math::clamp01(traffic.power * strength * (traffic.on_ground ? 1.0f : 0.35f));
+    wake.rpm_ratio = traffic.rpm_ratio;
   }
 }
 
