@@ -69,15 +69,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.1-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.6.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.6.1-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.6.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.6.0 Windows Build #${{ github.run_number }}" \
-            --notes "Wheel-track build: user-aircraft landing-gear contacts now press nearby active OGR grass in the direction of travel, keep a temporary flattened state per grass instance, then recover gradually over about 5.5 seconds. The effect reads X-Plane gear contact/deployment/tire geometry datarefs and adds to existing wind, prop wash, jet blast and online-traffic bending without changing the fixed active-instance budget. 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware user RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
+            "OGR-v0.6.1-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.6.1 Windows Build #${{ github.run_number }}" \
+            --notes "Wheel-track diagnostic hotfix: the gear interaction subsystem is now initialized explicitly at plugin startup, logs the exact OGR version and whether required X-Plane gear datarefs are available, and logs the first detected ground-contact set. This makes stale binaries or unavailable gear inputs immediately visible in Log.txt. The v0.6 recoverable wheel flattening, 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
