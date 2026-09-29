@@ -2,9 +2,6 @@ name: Build Oafish Grass Runtime
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    tags: [ "v*", "ogr-v*" ]
 
 permissions:
   contents: write
