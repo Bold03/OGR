@@ -42,4 +42,10 @@ inline void normalize_or(float x, float z, float fallback_x, float fallback_z,
   }
 }
 
+// Runtime hooks are implemented in runtime_wheel.cpp. Explicit initialization
+// lets the plugin report wheel-dataref availability at startup, even before the
+// first grass instance happens to be drawn.
+void initialize_runtime();
+void reset_runtime();
+
 } // namespace ogr::wheel
