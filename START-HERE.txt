@@ -1,45 +1,49 @@
-OAFISH GRASS RUNTIME v0.2.2 - START HERE
+OAFISH GRASS RUNTIME v0.3.0 - START HERE
 ========================================
 
-1) BUILD/DOWNLOAD the plugin from GitHub Releases.
+1) DOWNLOAD the latest OGR release.
 
-2) INSTALL:
+2) INSTALL THE PLUGIN:
    X-Plane 11\Resources\plugins\OafishGrassRuntime\win_x64\OafishGrassRuntime.xpl
 
-3) COPY this folder into your scenery:
-   release\WED-Starter\OafishGrass
+3) INSTALL THE SHARED GRASS LIBRARY ONCE:
+   Copy the whole OafishGrass_Library folder to:
 
-   Example:
-   X-Plane 11\Custom Scenery\WIDN Tanjung Pinang\OafishGrass\ogr_grass.for
+   X-Plane 11\Custom Scenery\OafishGrass_Library\
 
-4) IN WED:
+   Keep that scenery pack enabled in scenery_packs.ini.
+
+4) IN ANY AIRPORT PROJECT / WED:
    - Choose Forest Tool
    - Resource: OafishGrass/ogr_grass.for
-   - Draw the grass polygon exactly where grass is allowed
+   - Draw the grass Area polygon exactly where grass is allowed
    - Holes are supported
    - Set WED Density as desired
    - Save and Export Scenery Pack
 
+   You DO NOT need to copy grass_A.obj / grass_B.obj / grass_C.obj or the grass
+   textures into every airport anymore. They live once in OafishGrass_Library.
+
 5) START X-PLANE.
-   OGR reads the exported uncompressed WED DSF automatically.
-   BUILD_GRASS_AREAS.cmd is NOT required for the normal workflow.
+   OGR finds the shared library provider, scans exported uncompressed scenery
+   DSFs for OafishGrass/ogr_grass.for, and builds one shared runtime area cache
+   inside OafishGrass_Library/OafishGrass/ogr_areas.json.
 
-6) LARGE AREAS / v0.2.2:
-   - Candidate grass now follows the camera automatically
-   - Default candidate budget: 10000
-   - Active XPLM instances remain capped at 1600
-   - You can map a much larger grass polygon without using all candidates at
-     only one edge of the airport
-
-7) AFTER EDITING WED:
+6) AFTER EDITING WED:
    - Save and Export Scenery Pack again
-   - Then restart X-Plane, or use:
+   - Restart X-Plane, or use:
      Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas
 
-8) FALLBACK ONLY:
-   If Log.txt says the DSF is compressed/unsupported, run:
-   OafishGrass\BUILD_GRASS_AREAS.cmd
-   OGR preserves the legacy ogr_areas.json when direct DSF parsing cannot be used.
+7) LARGE AREAS:
+   - Candidate grass follows the camera automatically
+   - Default candidate budget: 10000
+   - Active XPLM instances remain capped at 1600
+   - Spatial bins + active-only animation remain enabled
+
+8) LEGACY / FALLBACK WORKFLOW:
+   WED-Starter/OafishGrass is still included. It can be copied into an airport
+   scenery and BUILD_GRASS_AREAS.cmd can still be used for compressed/unsupported
+   DSFs. The preferred v0.3 workflow is the shared library above.
 
 9) REPLAY:
    - Fly/taxi normally first so OGR records history
@@ -49,7 +53,7 @@ OAFISH GRASS RUNTIME v0.2.2 - START HERE
    - History window is up to about 20 minutes
 
 DEFAULTS:
-- Draw/OBJ LOD: 914.4 m = 3000 ft
+- Draw radius setting: 914.4 m
 - Animated ring: 600 m
 - Boundary safety margin: 1.4 m
 - Weather wind: ON
@@ -61,5 +65,6 @@ DEFAULTS:
 - No shadow / no black grass cards retained
 
 IMPORTANT:
-The .for file is used for WED authoring and OGR metadata. OGR reads Area forest
-polygons from the exported DSF and draws the real grass. SSA is not required.
+The library .for resource is used for WED authoring and OGR metadata. OGR reads
+Area forest polygons from exported DSFs and draws the real animated grass. SSA
+is not required.
