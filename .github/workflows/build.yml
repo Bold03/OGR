@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Test grass, replay and direct DSF parser
+      - name: Test grass, replay, traffic and direct DSF parser
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Test WED area exporter fallback
@@ -46,10 +46,8 @@ jobs:
           Copy-Item $xpl.FullName package/OafishGrassRuntime/win_x64/OafishGrassRuntime.xpl
           Copy-Item README.md,START-HERE.txt package/OafishGrassRuntime/
 
-          # Legacy/local authoring fallback remains available.
           Copy-Item -Recurse release/WED-Starter/OafishGrass package/WED-Starter/OafishGrass
 
-          # Preferred v0.3 workflow: one shared Custom Scenery library.
           Copy-Item release/OafishGrass_Library/library.txt package/OafishGrass_Library/library.txt
           Copy-Item release/OafishGrass_Library/README.txt package/OafishGrass_Library/README.txt
           Copy-Item release/WED-Starter/OafishGrass/ogr_grass.for package/OafishGrass_Library/OafishGrass/ogr_grass.for
@@ -59,15 +57,15 @@ jobs:
           Copy-Item release/WED-Starter/OafishGrass/grass_atlas.png package/OafishGrass_Library/OafishGrass/grass_atlas.png
           Copy-Item release/WED-Starter/OafishGrass/ogr_marker.png package/OafishGrass_Library/OafishGrass/ogr_marker.png
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.3.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.4.0-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.3.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.4.0-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.3.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.3.0 Windows Build #${{ github.run_number }}" \
-            --notes "Shared-library build: install OafishGrass_Library once in Custom Scenery and use OafishGrass/ogr_grass.for directly from WED. OGR aggregates exported DSF grass areas into the library runtime cache. Dynamic streaming, 10,000 candidate budget, replay-aware RPM/N1 wash, weather wind and Direct DSF parsing remain enabled."
+            "OGR-v0.4.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.4.0 Windows Build #${{ github.run_number }}" \
+            --notes "Online-traffic interaction build: OGR reads X-Plane 11.50+ TCAS targets published by IVAO/VATSIM/traffic plugins, estimates conservative prop/jet wake from ICAO type, throttle and ground speed, and lets nearby online traffic disturb grass. Read-only TCAS integration; OGR does not acquire or override traffic. Shared library, dynamic streaming, 10,000 candidate budget, Direct DSF parsing, replay-aware user-aircraft RPM/N1 wash and weather wind remain enabled."
