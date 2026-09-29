@@ -92,6 +92,7 @@ private:
 
   struct Pack {
     std::filesystem::path scenery_root;
+    std::filesystem::path asset_root;
     std::filesystem::path config_path;
     std::string name;
     Settings settings;
@@ -128,10 +129,6 @@ private:
     float x{}, y{}, z{}, heading{}, power{}, rpm_ratio{};
   };
 
-  // The original v0.1 update loop is compiled as update_live(). The public
-  // update() wrapper adds replay recording/playback while reusing stable
-  // geometry/terrain code. v0.2.1 introduced spatial bins; v0.2.2 adds a
-  // deterministic camera-centered candidate streaming window for huge areas.
   void update_live(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void update_live_fast(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void ensure_spatial_index(Pack& pack);
