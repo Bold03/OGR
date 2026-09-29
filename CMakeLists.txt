@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(OafishGrassRuntime VERSION 0.3.0 LANGUAGES CXX)
+project(OafishGrassRuntime VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ add_library(OafishGrass SHARED
   src/datarefs.cpp
   src/dsf_bridge.cpp
   src/dsf_reader.cpp
+  src/traffic.cpp
   src/runtime_replay.cpp
 )
 
@@ -55,23 +56,28 @@ include(CTest)
 if(BUILD_TESTING)
   add_executable(ogr_grass_math_test tests/grass_math_test.cpp)
   add_executable(ogr_replay_test tests/replay_test.cpp)
+  add_executable(ogr_traffic_test tests/traffic_test.cpp)
   add_executable(ogr_dsf_reader_test
     tests/dsf_reader_test.cpp
     src/dsf_reader.cpp
   )
   target_include_directories(ogr_grass_math_test PRIVATE include)
   target_include_directories(ogr_replay_test PRIVATE include)
+  target_include_directories(ogr_traffic_test PRIVATE include)
   target_include_directories(ogr_dsf_reader_test PRIVATE include)
   if(MSVC)
     target_compile_options(ogr_grass_math_test PRIVATE /W4 /EHsc /utf-8)
     target_compile_options(ogr_replay_test PRIVATE /W4 /EHsc /utf-8)
+    target_compile_options(ogr_traffic_test PRIVATE /W4 /EHsc /utf-8)
     target_compile_options(ogr_dsf_reader_test PRIVATE /W4 /EHsc /utf-8)
   else()
     target_compile_options(ogr_grass_math_test PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(ogr_replay_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(ogr_traffic_test PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(ogr_dsf_reader_test PRIVATE -Wall -Wextra -Wpedantic)
   endif()
   add_test(NAME ogr_grass_geometry_and_engine_wash COMMAND ogr_grass_math_test)
   add_test(NAME ogr_replay_history COMMAND ogr_replay_test)
+  add_test(NAME ogr_tcas_traffic_estimator COMMAND ogr_traffic_test)
   add_test(NAME ogr_direct_dsf_reader COMMAND ogr_dsf_reader_test)
 endif()
