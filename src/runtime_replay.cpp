@@ -1,4 +1,5 @@
 #include "ogr/runtime.hpp"
+#include "ogr/lod.hpp"
 
 // Reuse the proven runtime implementation for loading, geometry generation,
 // terrain probing and object handling. Its original update() body is kept as
@@ -9,10 +10,12 @@
 #undef update
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
+#include <vector>
 
 namespace ogr {
 namespace {
@@ -60,8 +63,8 @@ uint64_t stream_candidate_key(size_t area_index, int ix, int iz, uint32_t tier) 
 void Runtime::ensure_spatial_index(Pack& pack) {
   if (!pack.spatial_bins.empty() || pack.tiles.empty()) return;
 
-  // Large cells keep hash lookups low; the exact draw-radius test below still
-  // determines visibility. The range is conservative for old CPUs/iGPUs.
+  // 256 m maximum cells keep the 2 km lookup bounded on old CPUs. The exact
+  // radial test below still determines visibility.
   pack.spatial_cell_m = std::clamp(pack.settings.draw_distance_m * 0.25f, 64.0f, 256.0f);
   pack.spatial_bins.clear();
   pack.spatial_bins.reserve(std::max<size_t>(16, pack.tiles.size() / 24));
@@ -95,25 +98,45 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
 
   const bool first_stream = !pack.stream_initialized;
   const size_t budget = static_cast<size_t>(std::max(100, pack.settings.max_total_tiles));
+  const auto stream_budget = lod::split_stream_budget(budget);
 
   struct StreamCandidate {
     Tile tile;
     float d2{};
+    uint64_t priority{};
   };
-  std::vector<StreamCandidate> candidates;
-  candidates.reserve(std::min<size_t>(budget * 2u, 30000u));
+
+  std::array<std::vector<StreamCandidate>, 4> passes;
+  passes[0].reserve(stream_budget.near_dense * 2u);
+  passes[1].reserve(stream_budget.near_outer * 2u);
+  passes[2].reserve(stream_budget.mid * 2u);
+  passes[3].reserve(stream_budget.far * 2u);
 
   const uint32_t pack_seed = grass_math::mix_hash(
       static_cast<uint32_t>(std::hash<std::string>{}(pack.name)));
   const float draw_radius = std::max(30.0f, pack.settings.draw_distance_m);
-  const float dense_radius = std::min(
-      draw_radius,
-      std::clamp(pack.settings.tile_size_m *
-                     std::sqrt(static_cast<float>(budget) / grass_math::pi) * 1.35f,
-                 180.0f, 300.0f));
+  const float animated_radius = std::clamp(pack.settings.animated_distance_m, 15.0f, draw_radius);
+  const float mid_radius = lod::mid_radius(animated_radius, draw_radius);
 
-  auto emit_pass = [&](float radius, float inner_radius, float spacing_multiplier,
-                       uint32_t tier) {
+  // Keep a genuinely dense patch around the camera, then spread cheaper grass
+  // through the rest of the animated, mid and far rings. This is what lets a
+  // fixed 1,600-instance budget visually reach 2 km instead of being consumed
+  // within the first few dozen metres.
+  const float dense_radius = std::min(
+      animated_radius,
+      std::clamp(pack.settings.tile_size_m *
+                     std::sqrt(static_cast<float>(stream_budget.near_dense) / grass_math::pi) * 1.15f,
+                 90.0f, 220.0f));
+
+  const float near_outer_inner = dense_radius * 0.72f;
+  const float mid_inner = std::max(dense_radius, animated_radius - 140.0f);
+  const float mid_outer = std::min(draw_radius, mid_radius + 140.0f);
+  const float far_inner = std::max(animated_radius, mid_radius - 170.0f);
+
+  auto emit_pass = [&](size_t pass_index, float radius, float inner_radius,
+                       float spacing_multiplier, uint8_t lod_tier, uint32_t key_tier,
+                       float fade_in_m, float fade_out_m, float base_keep) {
+    if (radius <= inner_radius || pass_index >= passes.size()) return;
     const float radius2 = radius * radius;
     const float inner2 = inner_radius * inner_radius;
 
@@ -121,18 +144,37 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
       const auto& area = pack.local_areas[area_index];
       if (area.outer.size() < 3) continue;
 
+      float area_min_x = area.outer.front().x;
+      float area_max_x = area.outer.front().x;
+      float area_min_z = area.outer.front().z;
+      float area_max_z = area.outer.front().z;
+      for (const auto& point : area.outer) {
+        area_min_x = std::min(area_min_x, point.x);
+        area_max_x = std::max(area_max_x, point.x);
+        area_min_z = std::min(area_min_z, point.z);
+        area_max_z = std::max(area_max_z, point.z);
+      }
+      if (area_max_x < camera_x - radius || area_min_x > camera_x + radius ||
+          area_max_z < camera_z - radius || area_min_z > camera_z + radius)
+        continue;
+
       const float density = std::clamp(pack.areas[area_index].density, 0.03f, 1.0f);
       const float base_spacing = pack.settings.tile_size_m /
                                  std::sqrt(std::max(0.03f, density));
       const float spacing = std::max(0.35f, base_spacing * spacing_multiplier);
-      const int ix0 = static_cast<int>(std::floor((camera_x - radius) / spacing));
-      const int ix1 = static_cast<int>(std::ceil((camera_x + radius) / spacing));
-      const int iz0 = static_cast<int>(std::floor((camera_z - radius) / spacing));
-      const int iz1 = static_cast<int>(std::ceil((camera_z + radius) / spacing));
+
+      const float scan_min_x = std::max(camera_x - radius, area_min_x - spacing);
+      const float scan_max_x = std::min(camera_x + radius, area_max_x + spacing);
+      const float scan_min_z = std::max(camera_z - radius, area_min_z - spacing);
+      const float scan_max_z = std::min(camera_z + radius, area_max_z + spacing);
+      const int ix0 = static_cast<int>(std::floor(scan_min_x / spacing));
+      const int ix1 = static_cast<int>(std::ceil(scan_max_x / spacing));
+      const int iz0 = static_cast<int>(std::floor(scan_min_z / spacing));
+      const int iz1 = static_cast<int>(std::ceil(scan_max_z / spacing));
 
       const uint32_t area_seed = pack_seed ^
           static_cast<uint32_t>(area_index + 1) * 2654435761u ^
-          tier * 2246822519u;
+          key_tier * 2246822519u;
 
       for (int iz = iz0; iz <= iz1; ++iz) {
         for (int ix = ix0; ix <= ix1; ++ix) {
@@ -144,6 +186,10 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
           const grass_math::Point2 p{ix * spacing + jitter_x, iz * spacing + jitter_z};
           const float d2 = distance2(p.x, p.z, camera_x, camera_z);
           if (d2 > radius2 || d2 < inner2) continue;
+          const float distance = std::sqrt(d2);
+          const float keep = lod::ring_keep_probability(
+              distance, inner_radius, radius, fade_in_m, fade_out_m, base_keep);
+          if (grass_math::hash01(seed ^ 0xc2b2ae35u) > keep) continue;
           if (!grass_math::point_in_area_margin(p, area.outer, area.holes,
                                                 pack.settings.boundary_margin_m))
             continue;
@@ -162,34 +208,60 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
           tile.model_variant = static_cast<size_t>(
               grass_math::mix_hash(seed ^ 0x6c8e9cf5u)) %
               std::max<size_t>(1, pack.objects.size());
-          tile.stream_key = stream_candidate_key(area_index, ix, iz, tier);
-          candidates.push_back({std::move(tile), d2});
+          tile.stream_key = stream_candidate_key(area_index, ix, iz, key_tier);
+          tile.lod_tier = lod_tier;
+          passes[pass_index].push_back({std::move(tile), d2,
+                                        mix64(stream_candidate_key(area_index, ix, iz, key_tier) ^
+                                              0xa0761d6478bd642fULL)});
         }
       }
     }
   };
 
-  // Dense, deterministic grass immediately around the camera. This is the
-  // important visual region and retains the original WED density/grid scale.
-  emit_pass(dense_radius, 0.0f, 1.0f, 1u);
+  // Stage 1a: full-density near detail. No fade at the camera side.
+  emit_pass(0, dense_radius, 0.0f, 1.0f, 0, 1u,
+            0.0f, std::min(35.0f, dense_radius * 0.22f), 1.0f);
 
-  // If the dense area does not use the full candidate budget (camera on apron,
-  // holes, narrow strips, etc.), add a cheaper coarse ring out to the configured
-  // draw distance. This keeps distant grass present without a huge CPU scan.
-  if (candidates.size() < budget && draw_radius > dense_radius + 1.0f)
-    emit_pass(draw_radius, dense_radius * 0.90f, 4.0f, 2u);
+  // Stage 1b: still inside the configured animated radius, but substantially
+  // cheaper. It overlaps the dense patch and fades into stage 2.
+  emit_pass(1, animated_radius, near_outer_inner, 3.0f, 0, 2u,
+            std::max(20.0f, dense_radius * 0.25f), 95.0f, 1.0f);
 
-  if (candidates.size() > budget) {
-    std::nth_element(candidates.begin(), candidates.begin() + budget, candidates.end(),
-                     [](const StreamCandidate& a, const StreamCandidate& b) {
-                       return a.d2 < b.d2;
-                     });
-    candidates.resize(budget);
-  }
+  // Stage 2: static/slow ring. At the v0.5 defaults this occupies roughly
+  // 460-1340 m, with density cross-fades at both ends.
+  emit_pass(2, mid_outer, mid_inner, 6.0f, 1, 3u,
+            120.0f, 150.0f, 0.92f);
+
+  // Stage 3: sparse far grass. A long outer fade avoids the obvious circular
+  // pop wall that the old 914.4 m OBJ LOD produced.
+  emit_pass(3, draw_radius, far_inner, 11.0f, 2, 4u,
+            180.0f, std::min(300.0f, draw_radius * 0.16f), 0.82f);
+
+  auto cap_pass = [](std::vector<StreamCandidate>& pass, size_t pass_budget,
+                     bool nearest) {
+    if (pass.size() <= pass_budget) return;
+    auto comp = [nearest](const StreamCandidate& a, const StreamCandidate& b) {
+      return nearest ? (a.d2 < b.d2) : (a.priority < b.priority);
+    };
+    std::nth_element(pass.begin(), pass.begin() + static_cast<std::ptrdiff_t>(pass_budget),
+                     pass.end(), comp);
+    pass.resize(pass_budget);
+  };
+
+  cap_pass(passes[0], stream_budget.near_dense, true);
+  cap_pass(passes[1], stream_budget.near_outer, false);
+  cap_pass(passes[2], stream_budget.mid, false);
+  cap_pass(passes[3], stream_budget.far, false);
+
+  std::vector<StreamCandidate> candidates;
+  candidates.reserve(budget);
+  for (auto& pass : passes)
+    for (auto& candidate : pass)
+      candidates.push_back(std::move(candidate));
 
   // Preserve overlapping streamed tiles, including their XPLM instance,
   // terrain height and animation phase. Only tiles entering/leaving the moving
-  // window are created/destroyed, which avoids visible mass popping.
+  // window are created/destroyed, which avoids a mass pop during recentering.
   std::unordered_map<uint64_t, Tile> old_tiles;
   old_tiles.reserve(pack.tiles.size() * 2u + 1u);
   for (auto& tile : pack.tiles) {
@@ -214,6 +286,7 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
       reused.phase = candidate.tile.phase;
       reused.model_variant = candidate.tile.model_variant;
       reused.stream_key = candidate.tile.stream_key;
+      reused.lod_tier = candidate.tile.lod_tier;
       reused.active_epoch = 0;
       next_tiles.push_back(std::move(reused));
     } else {
@@ -240,9 +313,12 @@ void Runtime::rebuild_stream_window(Pack& pack, float camera_x, float camera_z) 
 
   ensure_spatial_index(pack);
   if (first_stream) {
-    log("Dynamic grass streaming ready for " + pack.name + ": up to " +
-        std::to_string(budget) + " camera-local candidate(s), recenter " +
-        std::to_string(static_cast<int>(recenter)) + " m");
+    log("3-stage grass LOD ready for " + pack.name + ": animated " +
+        std::to_string(static_cast<int>(animated_radius)) + " m, mid " +
+        std::to_string(static_cast<int>(mid_radius)) + " m, far " +
+        std::to_string(static_cast<int>(draw_radius)) +
+        " m with deterministic density fade; up to " + std::to_string(budget) +
+        " streamed candidates");
   }
 }
 
@@ -250,9 +326,17 @@ void Runtime::refresh_active_set_fast(Pack& pack, float camera_x, float camera_z
   if (pack.objects.empty() || pack.tiles.empty()) return;
   ensure_spatial_index(pack);
 
-  struct Candidate { size_t index; float d2; };
-  std::vector<Candidate> candidates;
-  candidates.reserve(static_cast<size_t>(pack.settings.max_active_tiles) * 2u);
+  struct Candidate {
+    size_t index{};
+    float d2{};
+    uint64_t priority{};
+  };
+  std::array<std::vector<Candidate>, 3> tiers;
+  const auto active_budget = lod::split_active_budget(
+      static_cast<size_t>(std::max(3, pack.settings.max_active_tiles)));
+  tiers[0].reserve(active_budget.near * 3u);
+  tiers[1].reserve(active_budget.mid * 4u);
+  tiers[2].reserve(active_budget.far * 5u);
 
   const float draw = pack.settings.draw_distance_m;
   const float draw2 = draw * draw;
@@ -268,17 +352,108 @@ void Runtime::refresh_active_set_fast(Pack& pack, float camera_x, float camera_z
       for (const size_t index : it->second) {
         const auto& tile = pack.tiles[index];
         const float d2 = distance2(tile.x, tile.z, camera_x, camera_z);
-        if (d2 <= draw2) candidates.push_back({index, d2});
+        if (d2 > draw2) continue;
+        const size_t tier = std::min<size_t>(2, tile.lod_tier);
+        tiers[tier].push_back({index, d2, mix64(tile.stream_key ^ 0xe7037ed1a0b428dbULL)});
       }
     }
   }
 
-  if (static_cast<int>(candidates.size()) > pack.settings.max_active_tiles) {
-    std::nth_element(candidates.begin(),
-                     candidates.begin() + pack.settings.max_active_tiles,
-                     candidates.end(),
-                     [](const Candidate& a, const Candidate& b) { return a.d2 < b.d2; });
-    candidates.resize(static_cast<size_t>(pack.settings.max_active_tiles));
+  std::vector<Candidate> candidates;
+  candidates.reserve(static_cast<size_t>(pack.settings.max_active_tiles));
+
+  auto append_by_priority = [&](std::vector<Candidate>& src, size_t amount) {
+    if (amount == 0 || src.empty()) return size_t{0};
+    amount = std::min(amount, src.size());
+    if (src.size() > amount) {
+      std::nth_element(src.begin(), src.begin() + static_cast<std::ptrdiff_t>(amount), src.end(),
+                       [](const Candidate& a, const Candidate& b) {
+                         return a.priority < b.priority;
+                       });
+      src.resize(amount);
+    }
+    for (const auto& item : src) candidates.push_back(item);
+    return src.size();
+  };
+
+  // Near budget: keep most instances close to the camera for density, but
+  // reserve roughly 30% for a spread of animated grass farther out. Without
+  // this reservation, nearest-N selection consumes the whole budget at ~50 m.
+  {
+    auto& near = tiers[0];
+    const float core_radius = std::min(170.0f,
+        std::max(65.0f, pack.settings.animated_distance_m * 0.24f));
+    const float core2 = core_radius * core_radius;
+    std::vector<Candidate> core;
+    std::vector<Candidate> outer;
+    core.reserve(near.size());
+    outer.reserve(near.size());
+    for (const auto& item : near) {
+      if (item.d2 <= core2) core.push_back(item);
+      else outer.push_back(item);
+    }
+
+    const size_t near_budget = active_budget.near;
+    size_t core_target = std::min(core.size(),
+        static_cast<size_t>(std::floor(static_cast<double>(near_budget) * 0.70)));
+    if (core.size() > core_target) {
+      std::nth_element(core.begin(), core.begin() + static_cast<std::ptrdiff_t>(core_target), core.end(),
+                       [](const Candidate& a, const Candidate& b) { return a.d2 < b.d2; });
+      core.resize(core_target);
+    }
+    for (const auto& item : core) candidates.push_back(item);
+
+    size_t remaining = near_budget - core.size();
+    const size_t outer_added = append_by_priority(outer, remaining);
+    remaining -= std::min(remaining, outer_added);
+
+    // If the scenery has little grass in the outer animated ring, spend the
+    // unused share on additional nearby detail rather than leaving FPS unused.
+    if (remaining > 0 && near.size() > core.size() + outer_added) {
+      std::vector<Candidate> fallback;
+      fallback.reserve(near.size());
+      for (const auto& item : near) {
+        if (item.d2 > core2) continue;
+        bool already = false;
+        for (const auto& chosen : core) {
+          if (chosen.index == item.index) { already = true; break; }
+        }
+        if (!already) fallback.push_back(item);
+      }
+      if (fallback.size() > remaining) {
+        std::nth_element(fallback.begin(), fallback.begin() + static_cast<std::ptrdiff_t>(remaining), fallback.end(),
+                         [](const Candidate& a, const Candidate& b) { return a.d2 < b.d2; });
+        fallback.resize(remaining);
+      }
+      for (const auto& item : fallback) candidates.push_back(item);
+    }
+  }
+
+  append_by_priority(tiers[1], active_budget.mid);
+  append_by_priority(tiers[2], active_budget.far);
+
+  // If a ring contains no grass because of pavement/holes, let the remaining
+  // instance budget be filled by the closest not-yet-selected candidates.
+  if (candidates.size() < static_cast<size_t>(pack.settings.max_active_tiles)) {
+    const size_t target = static_cast<size_t>(pack.settings.max_active_tiles);
+    std::vector<Candidate> spare;
+    spare.reserve(pack.tiles.size());
+    for (const auto& tier : tiers) {
+      for (const auto& item : tier) {
+        bool selected = false;
+        for (const auto& chosen : candidates) {
+          if (chosen.index == item.index) { selected = true; break; }
+        }
+        if (!selected) spare.push_back(item);
+      }
+    }
+    const size_t needed = std::min(target - candidates.size(), spare.size());
+    if (needed > 0 && spare.size() > needed) {
+      std::nth_element(spare.begin(), spare.begin() + static_cast<std::ptrdiff_t>(needed), spare.end(),
+                       [](const Candidate& a, const Candidate& b) { return a.d2 < b.d2; });
+      spare.resize(needed);
+    }
+    for (const auto& item : spare) candidates.push_back(item);
   }
 
   ++pack.active_epoch;
@@ -390,7 +565,9 @@ void Runtime::update_live_fast(float elapsed_seconds, float aircraft_heading_deg
                                       pack.settings.weather_wind,
                                       &cached_wind_speed_mps_);
 
-    // Animation is O(active grass), not O(all candidates).
+    // Animation is O(active grass), not O(all candidates). Mid/far candidates
+    // are positioned once and then naturally remain static outside the
+    // animated_distance_m test in update_tile().
     for (const size_t index : pack.active_indices) {
       if (index >= pack.tiles.size()) continue;
       auto& tile = pack.tiles[index];
