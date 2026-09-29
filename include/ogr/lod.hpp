@@ -4,6 +4,15 @@
 #include <cmath>
 #include <cstddef>
 
+// Old Windows/XPLM include chains can still expose the legacy near/far macros.
+// They break member names such as budget.near / budget.far, so clear them here.
+#ifdef near
+#undef near
+#endif
+#ifdef far
+#undef far
+#endif
+
 namespace ogr::lod {
 
 struct StreamBudget {
