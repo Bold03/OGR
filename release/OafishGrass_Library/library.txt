@@ -1,0 +1,8 @@
+A
+800
+LIBRARY
+
+# Shared WED resource for Oafish Grass Runtime.
+# Scenery authors can use this virtual path without copying grass assets into
+# every airport package.
+EXPORT OafishGrass/ogr_grass.for OafishGrass/ogr_grass.for
