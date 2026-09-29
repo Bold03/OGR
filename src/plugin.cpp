@@ -66,7 +66,7 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
   std::snprintf(description, 256, "%s", "WED-authored animated grass runtime for X-Plane 11/12");
 
   try {
-    XPLMDebugString("[OGR] Oafish Grass Runtime v0.6.1 starting\n");
+    XPLMDebugString("[OGR] Oafish Grass Runtime v0.6.2 starting\n");
 
     // These must exist before an OBJ using them is loaded.
     for (int group = 0; group < 4; ++group) {
@@ -77,9 +77,6 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
     heading_ref = XPLMFindDataRef("sim/flightmodel/position/psi");
     agl_ref = XPLMFindDataRef("sim/flightmodel/position/y_agl");
 
-    // Initialize the wheel layer immediately. In v0.6.0 this was lazy and the
-    // diagnostic line could be absent until an OGR instance was positioned,
-    // which made stale binaries and missing gear refs impossible to distinguish.
     ogr::wheel::initialize_runtime();
 
     char root[2048]{};
