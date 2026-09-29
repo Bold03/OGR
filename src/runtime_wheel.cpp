@@ -18,13 +18,15 @@ namespace {
 constexpr int kWheelSlots = 10;
 constexpr float kSampleIntervalS = 0.02f;
 constexpr float kRecoveryS = 5.5f;
-// v0.6.2: do not over-rotate the OBJ just to make it look flatter. The grass
-// OBJ bend animation is authored for a -1..1 range and rotating beyond that
-// also rotates its upward normals, which can make crushed grass look brighter.
-// Use a moderate directional bend and get most of the visual flattening by
-// lowering the whole grass clump into the ground instead.
-constexpr float kDirectionalBendStrength = 0.58f;
-constexpr float kCrushSinkM = 0.28f;
+// The exported grass blades reach roughly 32 degrees when a bend dataref has
+// magnitude 1. X-Plane extrapolates OBJ animation keyframes outside that range,
+// so a magnitude near 90/32 gives an actual ~90 degree blade rotation while
+// still pivoting every blade around its own authored base instead of tilting
+// the whole grass tile.
+constexpr float kAuthoredFullBendDeg = 32.0f;
+constexpr float kWheelFlatDeg = 90.0f;
+constexpr float kWheelFlatDataref = kWheelFlatDeg / kAuthoredFullBendDeg;
+constexpr float kCrushSinkM = 0.015f;
 
 struct WheelContact {
   bool active{};
@@ -97,7 +99,7 @@ void ensure_wheel_refs() {
 
   if (!g_wheels.log_written) {
     if (g_wheels.available) {
-      write_log("[OGR] Wheel-track grass interaction armed: contacted grass bends under user-aircraft gear and recovers gradually\n");
+      write_log("[OGR] Wheel-track grass interaction armed: contacted grass rotates to 90 degrees and recovers gradually\n");
     } else {
       write_log("[OGR] Wheel-track grass interaction unavailable: required X-Plane gear datarefs were not found\n");
     }
@@ -284,21 +286,29 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
     for (int i = 0; i < 8; ++i) modified[i] = finite_or(data[i]);
   }
 
-  const ogr::grass_math::Vector2 world{
-      state.dir_x * state.amount * kDirectionalBendStrength,
-      state.dir_z * state.amount * kDirectionalBendStrength};
-  const auto local = ogr::grass_math::world_to_object(world, position->heading);
+  // Use the OBJ's own per-blade bend pivots for wheel flattening. At full
+  // contact the wheel target replaces the live wind/engine bend instead of
+  // adding on top of it, so the blade stops around 90 degrees rather than
+  // overshooting past horizontal. As the track recovers, normal live bending
+  // is blended back in smoothly.
+  const ogr::grass_math::Vector2 wheel_world{state.dir_x, state.dir_z};
+  const auto wheel_local = ogr::grass_math::world_to_object(wheel_world, position->heading);
+  const float amount = std::clamp(state.amount, 0.0f, 1.0f);
+  const float wheel_mix = ogr::wheel::smoothstep01(amount);
+  const float target_x = wheel_local.x * kWheelFlatDataref * amount;
+  const float target_z = wheel_local.z * kWheelFlatDataref * amount;
 
   for (int group = 0; group < 4; ++group) {
-    // Keep wheel-added bend inside the OBJ's authored key range. v0.6.0/0.6.1
-    // allowed +/-1.25, which could extrapolate the rotation and visibly change
-    // the grass lighting. Extra flattening now comes from vertical crush below.
-    modified[group * 2] = std::clamp(modified[group * 2] + local.x, -1.0f, 1.0f);
-    modified[group * 2 + 1] = std::clamp(modified[group * 2 + 1] + local.z, -1.0f, 1.0f);
+    const int x_index = group * 2;
+    const int z_index = x_index + 1;
+    modified[x_index] = modified[x_index] * (1.0f - wheel_mix) + target_x * wheel_mix;
+    modified[z_index] = modified[z_index] * (1.0f - wheel_mix) + target_z * wheel_mix;
+    modified[x_index] = std::clamp(modified[x_index], -kWheelFlatDataref, kWheelFlatDataref);
+    modified[z_index] = std::clamp(modified[z_index], -kWheelFlatDataref, kWheelFlatDataref);
   }
 
   XPLMDrawInfo_t crushed = *position;
-  crushed.y -= state.amount * kCrushSinkM;
+  crushed.y -= amount * kCrushSinkM;
   real_instance_set_position(instance, &crushed, modified);
 }
 
@@ -322,10 +332,9 @@ void reset_runtime() {
 } // namespace ogr::wheel
 
 // OGR's existing runtime is deliberately included as one translation unit so
-// replay can wrap the proven live runtime. v0.6.2 keeps wind/engine/traffic bend
-// values intact, adds only a bounded wheel-direction bend, and lowers crushed
-// clumps into the terrain so wheel tracks look flatter without over-rotating
-// the grass normals and causing the bright-color artifact.
+// replay can wrap the proven live runtime. v0.6.3 keeps normal wind/engine/
+// traffic animation intact, but a wheel contact temporarily takes over the same
+// per-blade pivots and drives them to about 90 degrees before gradual recovery.
 #define XPLMInstanceSetPosition ogr_instance_set_position
 #define XPLMDestroyInstance ogr_destroy_instance
 #include "runtime_replay.cpp"
