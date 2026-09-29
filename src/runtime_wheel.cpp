@@ -39,6 +39,7 @@ struct InstanceFlattenState {
 struct WheelRuntimeState {
   bool initialized{};
   bool log_written{};
+  bool contact_logged{};
   bool available{};
   XPLMDataRef time_ref{};
   XPLMDataRef aircraft_x_ref{};
@@ -144,6 +145,7 @@ void sample_wheels_if_needed() {
   const float s = std::sin(h);
   const float fallback_forward_x = s;
   const float fallback_forward_z = -c;
+  int active_contacts = 0;
 
   for (int i = 0; i < kWheelSlots; ++i) {
     auto& contact = g_wheels.contacts[static_cast<std::size_t>(i)];
@@ -193,6 +195,14 @@ void sample_wheels_if_needed() {
     contact.dir_x = dir_x;
     contact.dir_z = dir_z;
     contact.radius_m = std::clamp(1.15f + tire * 0.70f, 1.15f, 1.85f);
+    ++active_contacts;
+  }
+
+  if (active_contacts > 0 && !g_wheels.contact_logged) {
+    const std::string line = "[OGR] Wheel-track contact detected: " +
+        std::to_string(active_contacts) + " gear contact(s) are reporting ground contact\n";
+    XPLMDebugString(line.c_str());
+    g_wheels.contact_logged = true;
   }
 }
 
@@ -288,8 +298,20 @@ void ogr_destroy_instance(XPLMInstanceRef instance) {
 
 } // namespace
 
+namespace ogr::wheel {
+
+void initialize_runtime() {
+  ensure_wheel_refs();
+}
+
+void reset_runtime() {
+  g_wheels = WheelRuntimeState{};
+}
+
+} // namespace ogr::wheel
+
 // OGR's existing runtime is deliberately included as one translation unit so
-// replay can wrap the proven live runtime. v0.6 intercepts only instance
+// replay can wrap the proven live runtime. v0.6.1 intercepts only instance
 // position/destruction calls: the normal wind/engine/traffic data stays intact,
 // while a tiny per-instance wheel-track modifier is applied just before X-Plane
 // receives the eight grass bend values.
