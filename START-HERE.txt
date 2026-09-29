@@ -1,4 +1,4 @@
-OAFISH GRASS RUNTIME v0.3.0 - START HERE
+OAFISH GRASS RUNTIME v0.4.0 - START HERE
 ========================================
 
 1) DOWNLOAD the latest OGR release.
@@ -29,37 +29,58 @@ OAFISH GRASS RUNTIME v0.3.0 - START HERE
    DSFs for OafishGrass/ogr_grass.for, and builds one shared runtime area cache
    inside OafishGrass_Library/OafishGrass/ogr_areas.json.
 
-6) AFTER EDITING WED:
+6) ONLINE / AI TRAFFIC GRASS INTERACTION (v0.4.0):
+   - X-Plane 11.50+ TCAS target arrays are read only; OGR does not acquire,
+     override, move or modify IVAO/VATSIM/AI traffic.
+   - Compatible traffic providers that publish targets to X-Plane TCAS can
+     disturb nearby grass.
+   - OGR uses target ICAO aircraft type, reported throttle when available,
+     ground speed, heading and weight-on-wheels to estimate a conservative wake.
+   - Light prop, turboprop, normal jet and heavy-jet profiles are distinguished.
+   - Default scan interval: 0.10 s; nearby target budget: 24.
+   - The current hot path shares the existing engine-wash field, so up to the
+     free wake slots after the user aircraft engines are used at once.
+
+   Useful Log.txt messages:
+     [OGR] TCAS/online traffic grass interaction armed ...
+     [OGR] TCAS traffic detected: N nearby target(s) can now disturb OGR grass
+
+7) AFTER EDITING WED:
    - Save and Export Scenery Pack again
    - Restart X-Plane, or use:
      Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas
 
-7) LARGE AREAS:
+8) LARGE AREAS:
    - Candidate grass follows the camera automatically
    - Default candidate budget: 10000
    - Active XPLM instances remain capped at 1600
    - Spatial bins + active-only animation remain enabled
 
-8) LEGACY / FALLBACK WORKFLOW:
+9) LEGACY / FALLBACK WORKFLOW:
    WED-Starter/OafishGrass is still included. It can be copied into an airport
    scenery and BUILD_GRASS_AREAS.cmd can still be used for compressed/unsupported
-   DSFs. The preferred v0.3 workflow is the shared library above.
+   DSFs. The preferred workflow is the shared library above.
 
-9) REPLAY:
+10) REPLAY:
    - Fly/taxi normally first so OGR records history
-   - Prop RPM / jet power / weather wind are recorded at 20 Hz
+   - User-aircraft prop RPM / jet power / weather wind are recorded at 20 Hz
    - Enter X-Plane Replay and scrub inside the recorded window
    - Grass uses recorded prop wash / jet blast / wind
    - History window is up to about 20 minutes
+   - Online traffic wake is currently live-only; OGR does not invent historical
+     IVAO/VATSIM traffic positions during X-Plane replay.
 
 DEFAULTS:
 - Draw radius setting: 914.4 m
 - Animated ring: 600 m
 - Boundary safety margin: 1.4 m
 - Weather wind: ON
-- Prop RPM/thrust wash: ON
-- Jet N1/thrust wash: ON
-- Replay-aware engine/wind history: ON
+- User prop RPM/thrust wash: ON
+- User jet N1/thrust wash: ON
+- TCAS/online traffic wash: ON
+- Traffic wake estimate update: 0.10 s
+- Traffic target budget: 24
+- Replay-aware user engine/wind history: ON
 - Max active grass: 1600
 - Max streamed candidates: 10000
 - No shadow / no black grass cards retained
