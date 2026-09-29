@@ -1,6 +1,7 @@
 #include "ogr/datarefs.hpp"
 #include "ogr/dsf_bridge.hpp"
 #include "ogr/runtime.hpp"
+#include "ogr/wheel.hpp"
 
 #include <XPLMMenus.h>
 #include <XPLMPlugin.h>
@@ -65,6 +66,8 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
   std::snprintf(description, 256, "%s", "WED-authored animated grass runtime for X-Plane 11/12");
 
   try {
+    XPLMDebugString("[OGR] Oafish Grass Runtime v0.6.1 starting\n");
+
     // These must exist before an OBJ using them is loaded.
     for (int group = 0; group < 4; ++group) {
       refs.create("oafish/ogr/grass/bend_x_" + std::to_string(group), 0.0f, false, -1.0f, 1.0f);
@@ -73,6 +76,11 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
 
     heading_ref = XPLMFindDataRef("sim/flightmodel/position/psi");
     agl_ref = XPLMFindDataRef("sim/flightmodel/position/y_agl");
+
+    // Initialize the wheel layer immediately. In v0.6.0 this was lazy and the
+    // diagnostic line could be absent until an OGR instance was positioned,
+    // which made stale binaries and missing gear refs impossible to distinguish.
+    ogr::wheel::initialize_runtime();
 
     char root[2048]{};
     XPLMGetSystemPath(root);
@@ -86,6 +94,7 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
     const std::string message = std::string("[OGR] XPluginStart failed: ") + e.what() + "\n";
     XPLMDebugString(message.c_str());
     runtime.reset();
+    ogr::wheel::reset_runtime();
     refs.clear();
     return 0;
   }
@@ -98,6 +107,7 @@ PLUGIN_API void XPluginStop(void) {
   }
   destroy_menu();
   runtime.reset();
+  ogr::wheel::reset_runtime();
   xplane_root.clear();
   refs.clear();
 }
