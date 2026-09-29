@@ -43,6 +43,10 @@ struct Settings {
   float engine_wash_range_m{35.0f};
   float engine_wash_half_angle_deg{18.0f};
   float engine_wash_base_half_width_m{2.5f};
+  bool traffic_wash{true};
+  float traffic_wash_strength{0.90f};
+  int max_traffic_targets{24};
+  float traffic_update_interval_s{0.10f};
   int max_active_tiles{1600};
   int max_total_tiles{10000};
   float refresh_interval_s{0.35f};
@@ -129,6 +133,18 @@ private:
     float x{}, y{}, z{}, heading{}, power{}, rpm_ratio{};
   };
 
+  struct TrafficWake {
+    int mode_s_id{};
+    float x{}, y{}, z{};
+    float heading{};
+    float power{};
+    float rpm_ratio{};
+    float range_m{};
+    float half_angle_deg{};
+    float base_half_width_m{};
+    bool on_ground{};
+  };
+
   void update_live(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void update_live_fast(float elapsed_seconds, float aircraft_heading_deg, float aircraft_agl_m);
   void ensure_spatial_index(Pack& pack);
@@ -151,6 +167,11 @@ private:
   grass_math::Vector2 ambient_wind_world(float wind_strength, float full_bend_kt,
                                          bool enabled, float* speed_mps) const;
   void log(const std::string& text) const;
+
+  void ensure_traffic_datarefs();
+  void update_traffic_wakes(float dt, float aircraft_x, float aircraft_z);
+  grass_math::Vector2 traffic_wash_at(const Settings& settings, const Tile& tile,
+                                      float* wash_speed) const;
 
   void ensure_replay_datarefs();
   void record_replay_frame(float aircraft_x, float aircraft_y, float aircraft_z,
@@ -185,6 +206,23 @@ private:
   XPLMDataRef engine_x_ref_{};
   XPLMDataRef engine_y_ref_{};
   XPLMDataRef engine_z_ref_{};
+
+  XPLMDataRef traffic_mode_s_ref_{};
+  XPLMDataRef traffic_x_ref_{};
+  XPLMDataRef traffic_y_ref_{};
+  XPLMDataRef traffic_z_ref_{};
+  XPLMDataRef traffic_vx_ref_{};
+  XPLMDataRef traffic_vy_ref_{};
+  XPLMDataRef traffic_vz_ref_{};
+  XPLMDataRef traffic_psi_ref_{};
+  XPLMDataRef traffic_wow_ref_{};
+  XPLMDataRef traffic_throttle_ref_{};
+  XPLMDataRef traffic_icao_type_ref_{};
+  bool traffic_refs_initialized_{};
+  bool traffic_refs_available_{};
+  bool traffic_detected_logged_{};
+  float traffic_clock_{};
+  std::array<TrafficWake, 32> traffic_wakes_{};
 
   XPLMDataRef replay_ref_{};
   XPLMDataRef running_time_ref_{};
