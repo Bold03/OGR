@@ -69,15 +69,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.2-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.3-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.6.2-build-${{ github.run_number }}"
+          TAG="ogr-v0.6.3-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.6.2-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.6.2 Windows Build #${{ github.run_number }}" \
-            --notes "Wheel crush visual fix: wheel-added bend is now kept inside the grass OBJ's authored -1..1 animation range to avoid the brighter-color lighting artifact from over-rotated normals. Crushed grass is made visibly flatter by lowering the contacted clump up to 0.28 m into the terrain while keeping a moderate directional bend, then recovering over the existing 5.5 s track lifetime. 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
+            "OGR-v0.6.3-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.6.3 Windows Build #${{ github.run_number }}" \
+            --notes "90-degree wheel flatten build: full wheel contact now takes over the existing per-blade OGR bend pivots and drives the contacted grass to approximately 90 degrees in the direction of wheel travel. Live wind/engine/traffic bend is blended out while fully crushed so the grass does not overshoot past horizontal, then blends back during the existing 5.5 s recovery. The old deep 0.28 m sink is reduced to a tiny anti-z-fight offset because the flattening now comes from real rotation. 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
