@@ -15,12 +15,14 @@ TREE 0 0 1 1 0.5 100 0.01 0.01 1 0 OGR_marker
 
 # Oafish Grass Runtime extension metadata. X-Plane/WED ignore these comments;
 # OGR reads them from the scenery resource.
+# v0.5 uses a 3-stage runtime LOD: near animated, mid static/cheap, far sparse,
+# with deterministic density cross-fades so the outer edge does not pop at once.
 #OGR_VERSION 1
 #OGR_MODEL grass_A.obj
 #OGR_MODEL grass_B.obj
 #OGR_MODEL grass_C.obj
 #OGR_TILE_SIZE_M 2.4
-#OGR_DRAW_DISTANCE_M 914.4
+#OGR_DRAW_DISTANCE_M 2000.0
 #OGR_ANIMATED_DISTANCE_M 600.0
 #OGR_BOUNDARY_MARGIN_M 1.4
 #OGR_GROUND_OFFSET_M 0.0
