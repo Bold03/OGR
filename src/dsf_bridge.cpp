@@ -26,6 +26,12 @@ std::string trim(std::string value) {
   return value;
 }
 
+std::string normalized_resource(std::string value) {
+  std::replace(value.begin(), value.end(), '\\', '/');
+  while (value.rfind("./", 0) == 0) value.erase(0, 2);
+  return value;
+}
+
 std::vector<fs::path> scenery_roots(const fs::path& xplane_root) {
   std::vector<fs::path> roots;
   std::unordered_set<std::string> seen;
@@ -142,6 +148,46 @@ ForMetadata parse_for_metadata(const fs::path& for_path, const fs::path& scenery
   return out;
 }
 
+struct LibraryProvider {
+  bool valid{};
+  fs::path root;
+  fs::path for_path;
+  ForMetadata meta;
+};
+
+bool find_library_provider(const std::vector<fs::path>& roots, LibraryProvider& out) {
+  for (const auto& root : roots) {
+    const fs::path library_txt = root / "library.txt";
+    std::ifstream input(library_txt);
+    if (!input) continue;
+
+    std::string line;
+    while (std::getline(input, line)) {
+      line = trim(line);
+      if (line.empty() || line[0] == '#') continue;
+      std::istringstream row(line);
+      std::string command, virtual_path, physical_path;
+      row >> command >> virtual_path >> physical_path;
+      if (command != "EXPORT" && command != "EXPORT_BACKUP" && command != "EXPORT_EXTEND")
+        continue;
+      if (normalized_resource(virtual_path) != kOgrResource || physical_path.empty()) continue;
+
+      const fs::path for_path = root / fs::path(normalized_resource(physical_path));
+      std::error_code ec;
+      if (!fs::is_regular_file(for_path, ec)) continue;
+      ForMetadata meta = parse_for_metadata(for_path, root);
+      if (!meta.valid || meta.models.empty()) continue;
+
+      out.valid = true;
+      out.root = root;
+      out.for_path = for_path;
+      out.meta = std::move(meta);
+      return true;
+    }
+  }
+  return false;
+}
+
 double ring_area(const std::vector<dsf::Point>& points) {
   if (points.size() < 3) return 0.0;
   double mean_lat = 0.0;
@@ -164,13 +210,48 @@ json ring_json(const std::vector<dsf::Point>& ring) {
   return out;
 }
 
+void append_polygons(const fs::path& scenery_root, const fs::path& dsf_path,
+                     const dsf::ReadResult& read, json& areas, std::size_t& area_index) {
+  for (const auto& polygon : read.polygons) {
+    const unsigned fill_mode = polygon.parameter / 256u;
+    if (fill_mode != 0u || polygon.windings.empty()) continue;
+    std::size_t outer_index = 0;
+    double best = -1.0;
+    for (std::size_t i = 0; i < polygon.windings.size(); ++i) {
+      const double a = std::abs(ring_area(polygon.windings[i]));
+      if (a > best) { best = a; outer_index = i; }
+    }
+    if (polygon.windings[outer_index].size() < 3) continue;
+
+    json holes = json::array();
+    for (std::size_t i = 0; i < polygon.windings.size(); ++i) {
+      if (i != outer_index && polygon.windings[i].size() >= 3)
+        holes.push_back(ring_json(polygon.windings[i]));
+    }
+    const float density = std::clamp(static_cast<float>(polygon.parameter % 256u) / 255.0f,
+                                     0.03f, 1.0f);
+    const std::string id = "dsf_" + std::to_string(++area_index);
+    areas.push_back({
+        {"id", id},
+        {"name", scenery_root.filename().string() + " / " + dsf_path.stem().string()},
+        {"density", density},
+        {"outer", ring_json(polygon.windings[outer_index])},
+        {"holes", std::move(holes)},
+    });
+  }
+}
+
 bool write_direct_json(const fs::path& scenery_root, const ForMetadata& meta,
-                       const json& areas, std::string& error) {
+                       const json& areas, const std::string& source, std::string& error) {
   const fs::path output = scenery_root / "OafishGrass" / "ogr_areas.json";
+  std::error_code ec;
+  fs::create_directories(output.parent_path(), ec);
+  if (ec) { error = "cannot create " + output.parent_path().string(); return false; }
+
   json root = {
       {"format", "OGR_AREA_V1"},
       {"name", scenery_root.filename().string()},
-      {"source", "direct-dsf-v0.2"},
+      {"source", source},
       {"resource", kOgrResource},
       {"models", meta.models},
       {"settings", meta.settings},
@@ -183,11 +264,121 @@ bool write_direct_json(const fs::path& scenery_root, const ForMetadata& meta,
   return true;
 }
 
+void remove_generated_local_jsons(const std::vector<fs::path>& roots,
+                                  const fs::path& provider_root,
+                                  DsfRefreshStats& stats) {
+  for (const auto& root : roots) {
+    if (root.lexically_normal() == provider_root.lexically_normal()) continue;
+    const fs::path path = root / "OafishGrass" / "ogr_areas.json";
+    std::ifstream input(path);
+    if (!input) continue;
+    try {
+      const json existing = json::parse(input);
+      const std::string source = existing.value("source", std::string());
+      if (source.rfind("direct-dsf", 0) != 0 && source != "earth.wed.xml") continue;
+      std::error_code ec;
+      fs::remove(path, ec);
+      if (!ec)
+        stats.messages.push_back("Shared library migration: removed generated local area cache from " +
+                                 root.filename().string());
+    } catch (...) {
+      // Never delete a malformed/unknown user file.
+    }
+  }
+}
+
+DsfRefreshStats refresh_shared_library(const fs::path& xplane_root,
+                                       const std::vector<fs::path>& roots,
+                                       const LibraryProvider& provider) {
+  DsfRefreshStats stats;
+  stats.packs_seen = 1;
+  json areas = json::array();
+  std::size_t area_index = 0;
+  std::size_t dsf_count = 0;
+  std::size_t skipped_compressed = 0;
+  std::size_t skipped_errors = 0;
+
+  for (const auto& scenery_root : roots) {
+    if (scenery_root.lexically_normal() == provider.root.lexically_normal()) continue;
+    const fs::path earth_nav = scenery_root / "Earth nav data";
+    std::error_code ec;
+    if (!fs::is_directory(earth_nav, ec)) continue;
+
+    for (fs::recursive_directory_iterator it(earth_nav, ec), end; it != end && !ec; it.increment(ec)) {
+      if (ec || !it->is_regular_file(ec) || it->path().extension() != ".dsf") continue;
+      ++dsf_count;
+      const auto read = dsf::read_forest_polygons(it->path(), kOgrResource);
+      if (read.compressed) {
+        ++stats.compressed_dsfs;
+        ++skipped_compressed;
+        continue;
+      }
+      if (!read.ok) {
+        ++stats.parse_errors;
+        ++skipped_errors;
+        continue;
+      }
+      append_polygons(scenery_root, it->path(), read, areas, area_index);
+    }
+    if (ec) {
+      ++stats.parse_errors;
+      ++skipped_errors;
+    }
+  }
+
+  if (dsf_count == 0) {
+    stats.messages.push_back("Shared OGR library found, but no scenery DSFs were available to scan");
+    return stats;
+  }
+
+  if (areas.empty()) {
+    if (skipped_compressed || skipped_errors) {
+      stats.messages.push_back("Shared OGR library scan found no readable OGR areas; existing cache preserved");
+      return stats;
+    }
+    const fs::path old_json = provider.root / "OafishGrass" / "ogr_areas.json";
+    std::error_code ec;
+    fs::remove(old_json, ec);
+    stats.messages.push_back("Shared OGR library found no OGR Area forests in active scenery");
+    return stats;
+  }
+
+  std::string error;
+  if (!write_direct_json(provider.root, provider.meta, areas, "shared-library-direct-dsf-v0.3", error)) {
+    ++stats.parse_errors;
+    stats.messages.push_back("Shared OGR library write error: " + error);
+    return stats;
+  }
+
+  remove_generated_local_jsons(roots, provider.root, stats);
+  ++stats.packs_updated;
+  stats.areas_written = areas.size();
+  stats.messages.push_back("Shared OGR library rebuilt from active scenery: " +
+                           std::to_string(areas.size()) + " grass area(s)");
+  if (skipped_compressed)
+    stats.messages.push_back("Shared OGR library skipped " + std::to_string(skipped_compressed) +
+                             " compressed DSF(s)");
+  if (skipped_errors)
+    stats.messages.push_back("Shared OGR library skipped " + std::to_string(skipped_errors) +
+                             " unreadable DSF(s)");
+  return stats;
+}
+
 } // namespace
 
 DsfRefreshStats refresh_direct_dsf_areas(const fs::path& xplane_root) {
+  const auto roots = scenery_roots(xplane_root);
+
+  LibraryProvider provider;
+  if (find_library_provider(roots, provider)) {
+    auto stats = refresh_shared_library(xplane_root, roots, provider);
+    stats.messages.insert(stats.messages.begin(),
+                          "Shared OGR library provider: " + provider.root.filename().string());
+    return stats;
+  }
+
   DsfRefreshStats stats;
-  for (const auto& scenery_root : scenery_roots(xplane_root)) {
+  for (const auto& scenery_root : roots) {
     const fs::path for_path = scenery_root / "OafishGrass" / "ogr_grass.for";
     std::error_code ec;
     if (!fs::is_regular_file(for_path, ec)) continue;
@@ -230,51 +421,25 @@ DsfRefreshStats refresh_direct_dsf_areas(const fs::path& xplane_root) {
         stats.messages.push_back("Direct DSF parse error in " + it->path().string() + ": " + read.error);
         break;
       }
-
-      for (const auto& polygon : read.polygons) {
-        const unsigned fill_mode = polygon.parameter / 256u;
-        if (fill_mode != 0u || polygon.windings.empty()) continue; // v0.2 targets WED Area forests.
-        std::size_t outer_index = 0;
-        double best = -1.0;
-        for (std::size_t i = 0; i < polygon.windings.size(); ++i) {
-          const double a = std::abs(ring_area(polygon.windings[i]));
-          if (a > best) { best = a; outer_index = i; }
-        }
-        if (polygon.windings[outer_index].size() < 3) continue;
-        json holes = json::array();
-        for (std::size_t i = 0; i < polygon.windings.size(); ++i) {
-          if (i != outer_index && polygon.windings[i].size() >= 3)
-            holes.push_back(ring_json(polygon.windings[i]));
-        }
-        const float density = std::clamp(static_cast<float>(polygon.parameter % 256u) / 255.0f,
-                                         0.03f, 1.0f);
-        const std::string id = "dsf_" + it->path().stem().string() + "_" + std::to_string(++area_index);
-        areas.push_back({
-            {"id", id},
-            {"name", "DSF Forest " + id},
-            {"density", density},
-            {"outer", ring_json(polygon.windings[outer_index])},
-            {"holes", std::move(holes)},
-        });
-      }
+      append_polygons(scenery_root, it->path(), read, areas, area_index);
     }
     if (ec) {
       ++stats.parse_errors;
       scan_failed = true;
       stats.messages.push_back("Direct DSF directory scan error in " + earth_nav.string());
     }
-    if (scan_failed) continue; // preserve any legacy JSON as a safe fallback.
+    if (scan_failed) continue;
     if (dsf_count == 0) continue;
 
     if (areas.empty()) {
       const fs::path old_json = scenery_root / "OafishGrass" / "ogr_areas.json";
-      fs::remove(old_json, ec); // Successful DSF scan says there are no OGR area forests.
+      fs::remove(old_json, ec);
       stats.messages.push_back("Direct DSF found no OGR Area forests in " + scenery_root.filename().string());
       continue;
     }
 
     std::string error;
-    if (!write_direct_json(scenery_root, meta, areas, error)) {
+    if (!write_direct_json(scenery_root, meta, areas, "direct-dsf-v0.3", error)) {
       ++stats.parse_errors;
       stats.messages.push_back("Direct DSF write error: " + error);
       continue;
