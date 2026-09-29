@@ -154,8 +154,15 @@ bool Runtime::load_pack(const fs::path& scenery_root, const fs::path& config_pat
         s.value("engine_wash_half_angle_deg", 18.0f), 3.0f, 60.0f);
     out.settings.engine_wash_base_half_width_m = std::clamp(
         s.value("engine_wash_base_half_width_m", 2.5f), 0.5f, 12.0f);
+    out.settings.traffic_wash = s.value("traffic_wash", true);
+    out.settings.traffic_wash_strength = std::clamp(
+        s.value("traffic_wash_strength", 0.90f), 0.0f, 2.0f);
+    out.settings.max_traffic_targets = std::clamp(
+        s.value("max_traffic_targets", 24), 0, 32);
+    out.settings.traffic_update_interval_s = std::clamp(
+        s.value("traffic_update_interval_s", 0.10f), 0.05f, 0.50f);
     out.settings.max_active_tiles = std::clamp(s.value("max_active_tiles", 1600), 50, 20000);
-    out.settings.max_total_tiles = std::clamp(s.value("max_total_tiles", 8000), 100, 500000);
+    out.settings.max_total_tiles = std::clamp(s.value("max_total_tiles", 10000), 100, 500000);
     out.settings.refresh_interval_s = std::clamp(s.value("refresh_interval_s", 0.35f), 0.1f, 2.0f);
     out.settings.animation_interval_s = std::clamp(s.value("animation_interval_s", 0.05f), 0.02f, 0.5f);
     out.settings.hide_aircraft_agl_ft = std::clamp(s.value("hide_aircraft_agl_ft", 3000.0f), 0.0f, 30000.0f);
@@ -396,6 +403,9 @@ void Runtime::unload() {
   if (probe_) XPLMDestroyProbe(probe_);
   probe_ = nullptr;
   engine_wakes_ = {};
+  traffic_wakes_ = {};
+  traffic_clock_ = 0.0f;
+  traffic_detected_logged_ = false;
   cached_wind_ = {};
   cached_wind_speed_mps_ = 0.0f;
   engine_clock_ = 0.0f;
@@ -493,6 +503,11 @@ void Runtime::update_engines(float dt, float aircraft_x, float aircraft_z, float
     wake.rpm_ratio = grass_math::approach(wake.rpm_ratio, ratio, dt, 0.20f);
     if (i >= count) wake = {};
   }
+
+  // X-Plane 11.50+ traffic providers publish online/AI targets through the
+  // TCAS arrays. OGR reads them only, estimates a conservative wake and places
+  // the nearest targets into unused engine-wake slots before grass animation.
+  update_traffic_wakes(dt, aircraft_x, aircraft_z);
 }
 
 grass_math::Vector2 Runtime::ambient_wind_world(float wind_strength, float full_bend_kt,
@@ -644,9 +659,6 @@ void Runtime::update(float elapsed_seconds, float aircraft_heading_deg, float ai
   for (auto& pack : packs_) {
     const float hide_m = pack.settings.hide_aircraft_agl_ft * 0.3048f;
     if (pack.settings.hide_aircraft_agl_ft > 0.0f && aircraft_agl_m >= hide_m) {
-      // Do the expensive destroy pass only once while the aircraft remains
-      // above the cutoff. This matters on low-end CPUs with thousands of
-      // candidate grass tiles.
       if (!pack.altitude_suspended) {
         destroy_pack_instances(pack);
         pack.altitude_suspended = true;
@@ -657,7 +669,6 @@ void Runtime::update(float elapsed_seconds, float aircraft_heading_deg, float ai
     }
     if (pack.altitude_suspended) {
       pack.altitude_suspended = false;
-      // Rebuild the camera-visible ring immediately after descent.
       pack.refresh_clock = pack.settings.refresh_interval_s;
       pack.animation_clock = pack.settings.animation_interval_s;
     }
