@@ -31,7 +31,7 @@ struct Area {
 
 struct Settings {
   float tile_size_m{2.4f};
-  float draw_distance_m{914.4f};
+  float draw_distance_m{2000.0f};
   float animated_distance_m{600.0f};
   float boundary_margin_m{1.4f};
   float ground_offset_m{0.0f};
@@ -89,6 +89,7 @@ private:
     size_t model_variant{};
     uint64_t stream_key{};
     uint32_t active_epoch{};
+    uint8_t lod_tier{}; // 0 = near, 1 = mid, 2 = far
     bool positioned_once{};
     bool animated_last{};
     XPLMInstanceRef instance{};
@@ -115,9 +116,9 @@ private:
     uint32_t active_epoch{1};
     bool spatial_log_done{};
 
-    // v0.2.2: the candidate window follows the camera. This removes the old
-    // failure mode where a huge WED polygon consumed the global candidate cap
-    // at one edge of the airport and left distant parts with no OGR grass.
+    // v0.2.2+: the candidate window follows the camera. v0.5 keeps the same
+    // camera-local stream, but distributes it across near/mid/far LOD tiers so
+    // the 10k candidate budget is not exhausted only around the camera.
     float stream_center_x{};
     float stream_center_z{};
     float stream_recenter_m{60.0f};
