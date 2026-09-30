@@ -69,15 +69,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.5-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.7.0-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.6.5-build-${{ github.run_number }}"
+          TAG="ogr-v0.7.0-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.6.5-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.6.5 Windows Build #${{ github.run_number }}" \
-            --notes "Stationary-contact wheel fix: grass now stays flattened to about 90 degrees for as long as a user-aircraft tire remains physically on it, even when the aircraft is completely stopped. Movement is used only to remember the natural flattening direction; when the aircraft stops, that last direction is held instead of letting the grass stand back up. Recovery begins only after the wheel moves away or loses ground contact, keeping the existing 5.5-second recovery behavior. 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
+            "OGR-v0.7.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.7.0 Windows Build #${{ github.run_number }}" \
+            --notes "Traffic wheel-track build: TCAS/IVAO/VATSIM/AI aircraft that publish X-Plane weight-on-wheels can now flatten OGR grass under estimated landing-gear positions. Because TCAS does not expose each remote tire coordinate, OGR maps each grounded target to a lightweight class-scaled virtual footprint (nose wheel plus left/right mains) for light props, turboprops, normal jets and heavy jets. Moving traffic uses velocity for the flatten direction; parked traffic uses heading and keeps grass pinned while weight-on-wheels remains true. Grass recovers after the traffic aircraft leaves. Existing v0.6.5 user-aircraft stationary wheel pressure, 90-degree per-blade flattening, 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS engine/prop wash remain enabled."
