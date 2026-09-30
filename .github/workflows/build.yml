@@ -69,15 +69,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.4-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.5-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.6.4-build-${{ github.run_number }}"
+          TAG="ogr-v0.6.5-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.6.4-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.6.4 Windows Build #${{ github.run_number }}" \
-            --notes "Rolling-only wheel-track build: the 90-degree grass crush is now driven by measured wheel movement instead of mere ground contact. Parked aircraft no longer continuously flatten the grass under their tires; once the aircraft stops, no new crush is applied and the existing track recovers over the normal 5.5-second lifetime. Tiny stationary position jitter below about 0.12 m/s is ignored, while very slow taxi motion ramps smoothly to full effect by about 0.75 m/s. Existing 90-degree per-blade flattening, 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
+            "OGR-v0.6.5-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.6.5 Windows Build #${{ github.run_number }}" \
+            --notes "Stationary-contact wheel fix: grass now stays flattened to about 90 degrees for as long as a user-aircraft tire remains physically on it, even when the aircraft is completely stopped. Movement is used only to remember the natural flattening direction; when the aircraft stops, that last direction is held instead of letting the grass stand back up. Recovery begins only after the wheel moves away or loses ground contact, keeping the existing 5.5-second recovery behavior. 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing, replay-aware RPM/N1 wash and TCAS/IVAO/VATSIM traffic interaction remain enabled."
