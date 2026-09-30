@@ -340,14 +340,14 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   // Rain makes the normal wind/prop/jet animation heavier without touching the
   // authored 90-degree wheel target. A small per-instance low-pass filter slows
   // rapid bend changes; full wetness also trims normal bend magnitude to 82%.
-  float modified[8]{};
+  std::array<float, 8> modified{};
   bool use_modified = false;
   if (data) {
     float target_energy = 0.0f;
     const float scale = ogr::wheel::wet_bend_scale(g_wheels.wetness);
     for (int i = 0; i < 8; ++i) {
-      modified[i] = finite_or(data[i]);
-      target_energy += std::abs(modified[i]);
+      modified[static_cast<std::size_t>(i)] = finite_or(data[i]);
+      target_energy += std::abs(modified[static_cast<std::size_t>(i)]);
     }
 
     if (wet_effect) {
@@ -357,7 +357,8 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
         modified = state.filtered_bend;
       } else {
         std::array<float, 8> target{};
-        for (int i = 0; i < 8; ++i) target[static_cast<std::size_t>(i)] = modified[i] * scale;
+        for (int i = 0; i < 8; ++i)
+          target[static_cast<std::size_t>(i)] = modified[static_cast<std::size_t>(i)] * scale;
 
         if (!state.filtered_initialized || dt <= 0.0f) {
           state.filtered_bend = target;
@@ -410,12 +411,13 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   if (state.amount <= 0.001f) {
     if (!wet_effect && state.amount <= 0.0f && best <= 0.0f)
       g_wheels.instance_states.erase(instance);
-    real_instance_set_position(instance, position, use_modified ? modified : data);
+    real_instance_set_position(instance, position, use_modified ? modified.data() : data);
     return;
   }
 
   if (!use_modified && data) {
-    for (int i = 0; i < 8; ++i) modified[i] = finite_or(data[i]);
+    for (int i = 0; i < 8; ++i)
+      modified[static_cast<std::size_t>(i)] = finite_or(data[i]);
   }
 
   // Use the OBJ's own per-blade bend pivots for wheel flattening. Full contact
@@ -432,15 +434,19 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   for (int group = 0; group < 4; ++group) {
     const int x_index = group * 2;
     const int z_index = x_index + 1;
-    modified[x_index] = modified[x_index] * (1.0f - wheel_mix) + target_x * wheel_mix;
-    modified[z_index] = modified[z_index] * (1.0f - wheel_mix) + target_z * wheel_mix;
-    modified[x_index] = std::clamp(modified[x_index], -kWheelFlatDataref, kWheelFlatDataref);
-    modified[z_index] = std::clamp(modified[z_index], -kWheelFlatDataref, kWheelFlatDataref);
+    modified[static_cast<std::size_t>(x_index)] =
+        modified[static_cast<std::size_t>(x_index)] * (1.0f - wheel_mix) + target_x * wheel_mix;
+    modified[static_cast<std::size_t>(z_index)] =
+        modified[static_cast<std::size_t>(z_index)] * (1.0f - wheel_mix) + target_z * wheel_mix;
+    modified[static_cast<std::size_t>(x_index)] = std::clamp(
+        modified[static_cast<std::size_t>(x_index)], -kWheelFlatDataref, kWheelFlatDataref);
+    modified[static_cast<std::size_t>(z_index)] = std::clamp(
+        modified[static_cast<std::size_t>(z_index)], -kWheelFlatDataref, kWheelFlatDataref);
   }
 
   XPLMDrawInfo_t crushed = *position;
   crushed.y -= amount * kCrushSinkM;
-  real_instance_set_position(instance, &crushed, modified);
+  real_instance_set_position(instance, &crushed, modified.data());
 }
 
 void ogr_destroy_instance(XPLMInstanceRef instance) {
