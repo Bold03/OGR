@@ -18,7 +18,9 @@ namespace {
 constexpr int kWheelSlots = 10;
 constexpr std::size_t kTrafficWheelSlots = 96; // up to 32 TCAS aircraft * 3 virtual gear contacts
 constexpr float kSampleIntervalS = 0.02f;
+constexpr float kWetSampleIntervalS = 0.10f;
 constexpr float kRecoveryS = 5.5f;
+constexpr float kWetRecoveryS = 32.0f;
 // The exported grass blades reach roughly 32 degrees when a bend dataref has
 // magnitude 1. X-Plane extrapolates OBJ animation keyframes outside that range,
 // so a magnitude near 90/32 gives an actual ~90 degree blade rotation while
@@ -43,11 +45,15 @@ struct InstanceFlattenState {
   float dir_x{};
   float dir_z{-1.0f};
   float last_time{-1.0f};
+  std::array<float, 8> filtered_bend{};
+  bool filtered_initialized{};
 };
 
 struct WheelRuntimeState {
   bool initialized{};
   bool log_written{};
+  bool wet_log_written{};
+  bool wet_active_logged{};
   bool contact_logged{};
   bool traffic_contact_logged{};
   bool available{};
@@ -61,7 +67,11 @@ struct WheelRuntimeState {
   XPLMDataRef gear_x_ref{};
   XPLMDataRef gear_z_ref{};
   XPLMDataRef tire_radius_ref{};
+  XPLMDataRef precipitation_ratio_ref{};
+  XPLMDataRef rain_percent_ref{};
   float last_sample_time{-1000.0f};
+  float last_wet_sample_time{-1000.0f};
+  float wetness{};
   std::array<float, kWheelSlots> previous_x{};
   std::array<float, kWheelSlots> previous_z{};
   std::array<float, kWheelSlots> previous_dir_x{};
@@ -98,6 +108,13 @@ void ensure_wheel_refs() {
   g_wheels.gear_z_ref = XPLMFindDataRef("sim/aircraft/parts/acf_gear_znodef");
   g_wheels.tire_radius_ref = XPLMFindDataRef("sim/aircraft/parts/acf_gear_tirrad");
 
+  // XP12 exposes precipitation_on_aircraft_ratio. XP11 commonly exposes
+  // rain_percent. Prefer the newer ratio when present, but sample both so OGR
+  // also works with weather plugins that update only the legacy rain dataref.
+  g_wheels.precipitation_ratio_ref =
+      XPLMFindDataRef("sim/weather/precipitation_on_aircraft_ratio");
+  g_wheels.rain_percent_ref = XPLMFindDataRef("sim/weather/rain_percent");
+
   g_wheels.available = g_wheels.aircraft_x_ref && g_wheels.aircraft_z_ref &&
                        g_wheels.heading_ref && g_wheels.gear_x_ref &&
                        g_wheels.gear_z_ref &&
@@ -111,11 +128,54 @@ void ensure_wheel_refs() {
     }
     g_wheels.log_written = true;
   }
+
+  if (!g_wheels.wet_log_written) {
+    if (g_wheels.precipitation_ratio_ref || g_wheels.rain_percent_ref) {
+      write_log("[OGR] Wet grass response armed: rain makes wind/prop/jet motion heavier and extends fully wet wheel-track recovery to about 32 seconds\n");
+    } else {
+      write_log("[OGR] Wet grass weather datarefs unavailable; dry grass response will be used\n");
+    }
+    g_wheels.wet_log_written = true;
+  }
 }
 
 float current_time() {
   ensure_wheel_refs();
   return g_wheels.time_ref ? finite_or(XPLMGetDataf(g_wheels.time_ref), 0.0f) : 0.0f;
+}
+
+void sample_wetness_if_needed() {
+  ensure_wheel_refs();
+  if (!g_wheels.precipitation_ratio_ref && !g_wheels.rain_percent_ref) {
+    g_wheels.wetness = 0.0f;
+    return;
+  }
+
+  const float now = current_time();
+  if (now >= g_wheels.last_wet_sample_time &&
+      now - g_wheels.last_wet_sample_time < kWetSampleIntervalS)
+    return;
+
+  float dt = kWetSampleIntervalS;
+  if (g_wheels.last_wet_sample_time > -900.0f && now >= g_wheels.last_wet_sample_time)
+    dt = std::clamp(now - g_wheels.last_wet_sample_time, 0.001f, 1.0f);
+  if (now + 0.25f < g_wheels.last_wet_sample_time)
+    dt = kWetSampleIntervalS;
+  g_wheels.last_wet_sample_time = now;
+
+  float raw = 0.0f;
+  if (g_wheels.precipitation_ratio_ref)
+    raw = std::max(raw, finite_or(XPLMGetDataf(g_wheels.precipitation_ratio_ref)));
+  if (g_wheels.rain_percent_ref)
+    raw = std::max(raw, finite_or(XPLMGetDataf(g_wheels.rain_percent_ref)));
+
+  const float target = ogr::wheel::wetness_target(raw);
+  g_wheels.wetness = ogr::wheel::approach_wetness(g_wheels.wetness, target, dt);
+
+  if (g_wheels.wetness >= 0.10f && !g_wheels.wet_active_logged) {
+    write_log("[OGR] Wet grass active: blade response is heavier and tire tracks now recover more slowly\n");
+    g_wheels.wet_active_logged = true;
+  }
 }
 
 void sample_wheels_if_needed() {
@@ -252,24 +312,70 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   }
 
   sample_wheels_if_needed();
-  if (!g_wheels.available && g_wheels.traffic_contact_count == 0) {
+  sample_wetness_if_needed();
+  const bool wet_effect = g_wheels.wetness > 0.001f;
+  if (!g_wheels.available && g_wheels.traffic_contact_count == 0 && !wet_effect) {
     real_instance_set_position(instance, position, data);
     return;
   }
 
   const float now = current_time();
   auto& state = g_wheels.instance_states[instance];
+  float dt = 0.0f;
   if (state.last_time >= 0.0f) {
     if (now + 0.25f < state.last_time) {
       state = {};
       state.last_time = now;
     } else {
-      const float dt = std::clamp(now - state.last_time, 0.0f, 0.5f);
-      state.amount = ogr::wheel::recover_linear(state.amount, dt, kRecoveryS);
+      dt = std::clamp(now - state.last_time, 0.0f, 0.5f);
+      const float recovery_s = ogr::wheel::wet_track_recovery_seconds(
+          g_wheels.wetness, kRecoveryS, kWetRecoveryS);
+      state.amount = ogr::wheel::recover_linear(state.amount, dt, recovery_s);
       state.last_time = now;
     }
   } else {
     state.last_time = now;
+  }
+
+  // Rain makes the normal wind/prop/jet animation heavier without touching the
+  // authored 90-degree wheel target. A small per-instance low-pass filter slows
+  // rapid bend changes; full wetness also trims normal bend magnitude to 82%.
+  float modified[8]{};
+  bool use_modified = false;
+  if (data) {
+    float target_energy = 0.0f;
+    const float scale = ogr::wheel::wet_bend_scale(g_wheels.wetness);
+    for (int i = 0; i < 8; ++i) {
+      modified[i] = finite_or(data[i]);
+      target_energy += std::abs(modified[i]);
+    }
+
+    if (wet_effect) {
+      if (target_energy <= 0.0001f) {
+        state.filtered_bend.fill(0.0f);
+        state.filtered_initialized = true;
+        modified = state.filtered_bend;
+      } else {
+        std::array<float, 8> target{};
+        for (int i = 0; i < 8; ++i) target[static_cast<std::size_t>(i)] = modified[i] * scale;
+
+        if (!state.filtered_initialized || dt <= 0.0f) {
+          state.filtered_bend = target;
+          state.filtered_initialized = true;
+        } else {
+          const float tau = ogr::wheel::wet_filter_seconds(g_wheels.wetness);
+          const float alpha = 1.0f - std::exp(-dt / std::max(0.01f, tau));
+          for (int i = 0; i < 8; ++i) {
+            auto& value = state.filtered_bend[static_cast<std::size_t>(i)];
+            value += (target[static_cast<std::size_t>(i)] - value) * alpha;
+          }
+        }
+        modified = state.filtered_bend;
+      }
+      use_modified = true;
+    } else {
+      state.filtered_initialized = false;
+    }
   }
 
   float best = 0.0f;
@@ -302,22 +408,20 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   }
 
   if (state.amount <= 0.001f) {
-    if (state.amount <= 0.0f && best <= 0.0f)
+    if (!wet_effect && state.amount <= 0.0f && best <= 0.0f)
       g_wheels.instance_states.erase(instance);
-    real_instance_set_position(instance, position, data);
+    real_instance_set_position(instance, position, use_modified ? modified : data);
     return;
   }
 
-  float modified[8]{};
-  if (data) {
+  if (!use_modified && data) {
     for (int i = 0; i < 8; ++i) modified[i] = finite_or(data[i]);
   }
 
   // Use the OBJ's own per-blade bend pivots for wheel flattening. Full contact
   // takes the blade to roughly 90 degrees whether the source is the user's gear
-  // or a TCAS traffic virtual wheel. The last meaningful movement direction is
-  // used for the user aircraft; traffic uses reported velocity when available
-  // and aircraft heading while stationary.
+  // or a TCAS traffic virtual wheel. Wetness changes only recovery time and the
+  // underlying normal motion; the tire pressure itself remains a full crush.
   const ogr::grass_math::Vector2 wheel_world{state.dir_x, state.dir_z};
   const auto wheel_local = ogr::grass_math::world_to_object(wheel_world, position->heading);
   const float amount = std::clamp(state.amount, 0.0f, 1.0f);
@@ -428,8 +532,9 @@ void reset_runtime() {
 } // namespace ogr::wheel
 
 // OGR's existing runtime is deliberately included as one translation unit so
-// replay can wrap the proven live runtime. v0.7 adds estimated TCAS/online/AI
-// wheel contacts while preserving v0.6.5's parked user-aircraft tire pressure.
+// replay can wrap the proven live runtime. v0.8 adds rain/wetness: normal bend
+// motion is heavier while wet and user/traffic tire tracks recover much more
+// slowly after the wheel leaves, while parked tire pressure still pins grass.
 #define XPLMInstanceSetPosition ogr_instance_set_position
 #define XPLMDestroyInstance ogr_destroy_instance
 #include "runtime_replay.cpp"
