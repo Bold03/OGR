@@ -35,7 +35,6 @@ struct WheelContact {
   float dir_x{};
   float dir_z{-1.0f};
   float radius_m{1.35f};
-  float motion{};
 };
 
 struct InstanceFlattenState {
@@ -63,6 +62,8 @@ struct WheelRuntimeState {
   float last_sample_time{-1000.0f};
   std::array<float, kWheelSlots> previous_x{};
   std::array<float, kWheelSlots> previous_z{};
+  std::array<float, kWheelSlots> previous_dir_x{};
+  std::array<float, kWheelSlots> previous_dir_z{};
   std::array<unsigned char, kWheelSlots> previous_valid{};
   std::array<WheelContact, kWheelSlots> contacts{};
   std::unordered_map<XPLMInstanceRef, InstanceFlattenState> instance_states;
@@ -100,7 +101,7 @@ void ensure_wheel_refs() {
 
   if (!g_wheels.log_written) {
     if (g_wheels.available) {
-      write_log("[OGR] Wheel-track grass interaction armed: rolling gear rotates contacted grass to 90 degrees; parked gear does not keep crushing it\n");
+      write_log("[OGR] Wheel-track grass interaction armed: touching gear holds contacted grass near 90 degrees even while parked; recovery starts after the wheel leaves\n");
     } else {
       write_log("[OGR] Wheel-track grass interaction unavailable: required X-Plane gear datarefs were not found\n");
     }
@@ -122,15 +123,10 @@ void sample_wheels_if_needed() {
       now - g_wheels.last_sample_time < kSampleIntervalS)
     return;
 
-  const float previous_sample_time = g_wheels.last_sample_time;
-  if (now + 0.25f < previous_sample_time) {
+  if (now + 0.25f < g_wheels.last_sample_time) {
     g_wheels.previous_valid.fill(0);
     g_wheels.instance_states.clear();
   }
-  const float sample_dt =
-      (previous_sample_time > -900.0f && now >= previous_sample_time)
-          ? std::clamp(now - previous_sample_time, 0.001f, 0.25f)
-          : 0.0f;
   g_wheels.last_sample_time = now;
 
   std::array<int, kWheelSlots> on_ground{};
@@ -159,48 +155,55 @@ void sample_wheels_if_needed() {
   const float s = std::sin(h);
   const float fallback_forward_x = s;
   const float fallback_forward_z = -c;
-  int moving_contacts = 0;
+  int active_contacts = 0;
 
   for (int i = 0; i < kWheelSlots; ++i) {
     auto& contact = g_wheels.contacts[static_cast<std::size_t>(i)];
     contact = {};
+    const std::size_t index = static_cast<std::size_t>(i);
 
     if (i >= x_count || i >= z_count) {
-      g_wheels.previous_valid[static_cast<std::size_t>(i)] = 0;
+      g_wheels.previous_valid[index] = 0;
       continue;
     }
 
     bool touching = false;
-    if (i < ground_count) touching = on_ground[static_cast<std::size_t>(i)] != 0;
+    if (i < ground_count) touching = on_ground[index] != 0;
     if (!touching && i < deflection_count)
-      touching = finite_or(deflection[static_cast<std::size_t>(i)]) > 0.001f;
-    if (i < deploy_count && finite_or(deploy[static_cast<std::size_t>(i)], 1.0f) < 0.45f)
+      touching = finite_or(deflection[index]) > 0.001f;
+    if (i < deploy_count && finite_or(deploy[index], 1.0f) < 0.45f)
       touching = false;
 
     if (!touching) {
-      g_wheels.previous_valid[static_cast<std::size_t>(i)] = 0;
+      g_wheels.previous_valid[index] = 0;
       continue;
     }
 
-    const float local_x = finite_or(gear_x[static_cast<std::size_t>(i)]);
-    const float local_z = finite_or(gear_z[static_cast<std::size_t>(i)]);
+    const float local_x = finite_or(gear_x[index]);
+    const float local_z = finite_or(gear_z[index]);
     const float world_x = aircraft_x + local_x * c - local_z * s;
     const float world_z = aircraft_z + local_x * s + local_z * c;
 
     float dir_x = fallback_forward_x;
     float dir_z = fallback_forward_z;
-    float speed_mps = 0.0f;
-    const std::size_t index = static_cast<std::size_t>(i);
-    if (g_wheels.previous_valid[index] && sample_dt > 0.0f) {
+    if (g_wheels.previous_valid[index]) {
       const float dx = world_x - g_wheels.previous_x[index];
       const float dz = world_z - g_wheels.previous_z[index];
       const float travel = std::hypot(dx, dz);
-      if (travel < 25.0f) {
-        speed_mps = travel / sample_dt;
-        if (travel > 0.001f)
-          ogr::wheel::normalize_or(dx, dz, fallback_forward_x, fallback_forward_z,
-                                   dir_x, dir_z);
+      if (travel > 0.002f && travel < 25.0f) {
+        ogr::wheel::normalize_or(dx, dz, fallback_forward_x, fallback_forward_z,
+                                 dir_x, dir_z);
+        g_wheels.previous_dir_x[index] = dir_x;
+        g_wheels.previous_dir_z[index] = dir_z;
+      } else {
+        ogr::wheel::normalize_or(g_wheels.previous_dir_x[index],
+                                 g_wheels.previous_dir_z[index],
+                                 fallback_forward_x, fallback_forward_z,
+                                 dir_x, dir_z);
       }
+    } else {
+      g_wheels.previous_dir_x[index] = fallback_forward_x;
+      g_wheels.previous_dir_z[index] = fallback_forward_z;
     }
 
     g_wheels.previous_x[index] = world_x;
@@ -208,21 +211,19 @@ void sample_wheels_if_needed() {
     g_wheels.previous_valid[index] = 1;
 
     const float tire = i < radius_count ? std::abs(finite_or(tire_radius[index])) : 0.35f;
-    const float motion = ogr::wheel::motion_weight(speed_mps);
-    contact.active = motion > 0.0f;
+    contact.active = true;
     contact.x = world_x;
     contact.z = world_z;
     contact.dir_x = dir_x;
     contact.dir_z = dir_z;
     contact.radius_m = std::clamp(1.15f + tire * 0.70f, 1.15f, 1.85f);
-    contact.motion = motion;
-    if (contact.active) ++moving_contacts;
+    ++active_contacts;
   }
 
-  if (moving_contacts > 0 && !g_wheels.contact_logged) {
-    const std::string line = "[OGR] Moving wheel-track contact detected: " +
-        std::to_string(moving_contacts) +
-        " rolling gear contact(s) can flatten grass; stationary gear is ignored\n";
+  if (active_contacts > 0 && !g_wheels.contact_logged) {
+    const std::string line = "[OGR] Wheel contact detected: " +
+        std::to_string(active_contacts) +
+        " gear contact(s) will keep grass flattened while the tires remain on it\n";
     XPLMDebugString(line.c_str());
     g_wheels.contact_logged = true;
   }
@@ -273,8 +274,7 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
     if (!contact.active) continue;
     const float dx = position->x - contact.x;
     const float dz = position->z - contact.z;
-    const float spatial = ogr::wheel::contact_weight(std::hypot(dx, dz), contact.radius_m);
-    const float weight = spatial * contact.motion;
+    const float weight = ogr::wheel::contact_weight(std::hypot(dx, dz), contact.radius_m);
     if (weight > best) {
       best = weight;
       best_contact = &contact;
@@ -286,6 +286,10 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
       state.dir_x = best_contact->dir_x;
       state.dir_z = best_contact->dir_z;
     }
+    // Static tire pressure is a continuous contact, not a one-shot track.
+    // Re-applying the spatial contact weight every update keeps the grass down
+    // indefinitely while the wheel remains over it. Recovery only wins after
+    // the wheel moves away or loses ground contact.
     state.amount = std::max(state.amount, best);
   }
 
@@ -301,11 +305,10 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
     for (int i = 0; i < 8; ++i) modified[i] = finite_or(data[i]);
   }
 
-  // Use the OBJ's own per-blade bend pivots for wheel flattening. At full
-  // moving contact the wheel target replaces the live wind/engine bend instead
-  // of adding on top of it, so the blade stops around 90 degrees rather than
-  // overshooting past horizontal. When the aircraft stops, there is no new
-  // wheel input and the existing track starts its normal recovery immediately.
+  // Use the OBJ's own per-blade bend pivots for wheel flattening. Full contact
+  // takes the blade to roughly 90 degrees whether the aircraft is rolling or
+  // parked. The last meaningful wheel-travel direction is retained when the
+  // aircraft stops, avoiding direction flicker from tiny position jitter.
   const ogr::grass_math::Vector2 wheel_world{state.dir_x, state.dir_z};
   const auto wheel_local = ogr::grass_math::world_to_object(wheel_world, position->heading);
   const float amount = std::clamp(state.amount, 0.0f, 1.0f);
@@ -347,9 +350,8 @@ void reset_runtime() {
 } // namespace ogr::wheel
 
 // OGR's existing runtime is deliberately included as one translation unit so
-// replay can wrap the proven live runtime. v0.6.4 keeps normal wind/engine/
-// traffic animation intact; only rolling gear creates a 90-degree wheel track.
-// A parked aircraft no longer continuously re-applies the crush state.
+// replay can wrap the proven live runtime. v0.6.5 treats wheel contact as real
+// tire pressure: rolling or parked gear keeps grass flat until contact ends.
 #define XPLMInstanceSetPosition ogr_instance_set_position
 #define XPLMDestroyInstance ogr_destroy_instance
 #include "runtime_replay.cpp"
