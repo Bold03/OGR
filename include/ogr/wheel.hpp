@@ -58,7 +58,7 @@ inline float approach_wetness(float current, float target, float dt,
   target = std::clamp(std::isfinite(target) ? target : 0.0f, 0.0f, 1.0f);
   if (!std::isfinite(dt) || dt <= 0.0f) return current;
   const float tau = std::max(0.25f, target > current ? wetting_s : drying_s);
-  const float alpha = 1.0f - std::exp(-std::min(dt, 5.0f) / tau);
+  const float alpha = 1.0f - std::exp(-dt / tau);
   return std::clamp(current + (target - current) * alpha, 0.0f, 1.0f);
 }
 
