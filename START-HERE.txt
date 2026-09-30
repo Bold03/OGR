@@ -1,4 +1,4 @@
-OAFISH GRASS RUNTIME v0.7.0 - START HERE
+OAFISH GRASS RUNTIME v0.8.0 - START HERE
 ========================================
 
 1) DOWNLOAD the latest OGR release.
@@ -29,19 +29,34 @@ OAFISH GRASS RUNTIME v0.7.0 - START HERE
    DSFs for OafishGrass/ogr_grass.for, and builds one shared runtime area cache
    inside OafishGrass_Library/OafishGrass/ogr_areas.json.
 
-6) ONLINE / AI TRAFFIC GRASS INTERACTION (v0.7.0):
+6) RAIN / WET GRASS (v0.8.0):
+   - OGR reads X-Plane precipitation/rain datarefs automatically.
+   - Wetness builds quickly while rain is active and dries gradually afterward.
+   - Wet blades react more heavily to wind, prop wash, jet blast and traffic wake.
+   - Full wetness slightly reduces normal bend amplitude and damps fast changes,
+     while tire flattening can still reach the normal approximately 90 degrees.
+   - Dry wheel tracks recover in about 5.5 seconds.
+   - Fully wet wheel tracks can remain visible for about 32 seconds after the
+     tire leaves. Intermediate wetness smoothly interpolates between those times.
+   - A wheel that is still physically on the grass keeps it pinned regardless
+     of whether the aircraft is moving or parked.
+
+   Useful Log.txt messages:
+     [OGR] Wet grass response armed: ...
+     [OGR] Wet grass active: blade response is heavier and tire tracks now recover more slowly
+
+7) ONLINE / AI TRAFFIC GRASS INTERACTION:
    - X-Plane 11.50+ TCAS target arrays are read only; OGR does not acquire,
      override, move or modify IVAO/VATSIM/AI traffic.
    - Compatible traffic providers that publish targets to X-Plane TCAS can
      disturb nearby grass with estimated engine/prop wash.
-   - Ground traffic can now also flatten grass under estimated tire positions.
+   - Ground traffic can also flatten grass under estimated tire positions.
    - TCAS does not expose each remote tire coordinate, so OGR estimates one
      nose-wheel point plus left/right main-gear points from aircraft class.
    - Light prop, turboprop, normal jet and heavy-jet footprints are different.
    - Moving traffic flattens grass in its travel direction; parked traffic uses
      aircraft heading and keeps grass down while weight-on-wheels remains true.
-   - When the traffic aircraft leaves, the grass recovers over the normal
-     approximately 5.5-second wheel-track recovery.
+   - When traffic leaves, recovery uses the same dry/wet recovery system.
    - Traffic wheel flattening is used only when X-Plane provides the TCAS
      weight-on-wheels array; OGR does not guess wheel contact for airborne traffic.
    - Default scan interval: 0.10 s; nearby target budget: 24.
@@ -51,19 +66,20 @@ OAFISH GRASS RUNTIME v0.7.0 - START HERE
      [OGR] TCAS traffic detected: N nearby target(s) can now disturb OGR grass
      [OGR] TCAS traffic wheel flattening active: N ground aircraft mapped to M virtual tire contact(s)
 
-7) USER AIRCRAFT WHEEL TRACKS:
+8) USER AIRCRAFT WHEEL TRACKS:
    - A tire physically touching grass drives the contacted blades toward about 90 degrees.
    - The grass remains flat even if the aircraft stops on top of it.
    - Movement is used to remember the natural flatten direction.
    - Recovery begins only after the tire moves away or loses ground contact.
-   - Normal recovery time is about 5.5 seconds.
+   - Dry recovery: about 5.5 seconds.
+   - Fully wet recovery: about 32 seconds.
 
-8) AFTER EDITING WED:
+9) AFTER EDITING WED:
    - Save and Export Scenery Pack again
    - Restart X-Plane, or use:
      Plugins > Oafish Grass Runtime > Reload WED/DSF grass areas
 
-9) LARGE AREAS / LOD:
+10) LARGE AREAS / LOD:
    - Candidate grass follows the camera automatically
    - Near animated ring: about 600 m
    - Mid/far sparse rings continue out to about 2000 m
@@ -71,12 +87,12 @@ OAFISH GRASS RUNTIME v0.7.0 - START HERE
    - Active XPLM instances remain capped at 1600
    - Spatial bins + active-only animation remain enabled
 
-10) LEGACY / FALLBACK WORKFLOW:
+11) LEGACY / FALLBACK WORKFLOW:
    WED-Starter/OafishGrass is still included. It can be copied into an airport
    scenery and BUILD_GRASS_AREAS.cmd can still be used for compressed/unsupported
    DSFs. The preferred workflow is the shared library above.
 
-11) REPLAY:
+12) REPLAY:
    - Fly/taxi normally first so OGR records history
    - User-aircraft prop RPM / jet power / weather wind are recorded at 20 Hz
    - Enter X-Plane Replay and scrub inside the recorded window
@@ -84,12 +100,19 @@ OAFISH GRASS RUNTIME v0.7.0 - START HERE
    - History window is up to about 20 minutes
    - Online traffic effects are live-only; OGR does not invent historical
      IVAO/VATSIM traffic positions during X-Plane replay.
+   - Wetness currently follows the live/current weather state rather than being
+     stored as a separate historical replay channel.
 
 DEFAULTS:
 - Draw radius setting: 2000 m
 - Animated ring: 600 m
 - Boundary safety margin: 1.4 m
 - Weather wind: ON
+- Rain/wet grass response: ON when X-Plane precipitation datarefs are available
+- Wetting response time constant: about 18 s
+- Drying response time constant: about 240 s
+- Dry tire-track recovery: about 5.5 s
+- Fully wet tire-track recovery: about 32 s
 - User prop RPM/thrust wash: ON
 - User jet N1/thrust wash: ON
 - User wheel flattening: ON, holds while parked
