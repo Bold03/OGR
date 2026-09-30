@@ -72,6 +72,7 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath "OGR-v0.6.3-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
