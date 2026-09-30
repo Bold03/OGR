@@ -1,5 +1,6 @@
 #include "ogr/runtime.hpp"
 #include "ogr/traffic.hpp"
+#include "ogr/wheel.hpp"
 
 #include <XPLMDataAccess.h>
 #include <XPLMCamera.h>
@@ -82,6 +83,7 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
 
   if (!enabled || !traffic_refs_available_ || target_cap <= 0) {
     traffic_wakes_ = {};
+    wheel::update_traffic_aircraft_contacts(nullptr, 0);
     return;
   }
 
@@ -99,6 +101,7 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
     const int id_count = XPLMGetDatavi(traffic_mode_s_ref_, ids.data(), 0, kTcasSlots);
     if (id_count <= 1) {
       traffic_wakes_ = {};
+      wheel::update_traffic_aircraft_contacts(nullptr, 0);
     } else {
       XPLMGetDatavf(traffic_x_ref_, x.data(), 0, kTcasSlots);
       XPLMGetDatavf(traffic_y_ref_, y.data(), 0, kTcasSlots);
@@ -123,6 +126,7 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
 
       struct Candidate {
         TrafficWake wake;
+        wheel::TrafficAircraftContact wheel_contact;
         float distance2{};
       };
       std::vector<Candidate> candidates;
@@ -147,9 +151,11 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
           type_view = std::string_view(slot, kTypeBytesPerSlot);
         }
         const auto profile = traffic::profile_for_icao(type_view);
+        const auto footprint = traffic::gear_footprint(profile.kind);
 
         const float speed = std::hypot(finite_or(vx[i]), finite_or(vz[i]));
         const bool on_ground = traffic_wow_ref_ ? wow[i] != 0 : std::abs(finite_or(vy[i])) < 1.5f;
+        const bool wheel_on_ground = traffic_wow_ref_ && wow[i] != 0;
         const float target_power = traffic::estimated_power(
             traffic_throttle_ref_ ? throttle[i] : 0.0f, speed, on_ground, profile);
 
@@ -175,8 +181,25 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
           break;
         }
 
-        if (wake.power < 0.005f && speed < 0.5f) continue;
-        candidates.push_back({wake, d2});
+        // Keep physically grounded traffic even when engines are idle so its
+        // tires can still flatten grass while parked. Airborne/unknown targets
+        // with no meaningful wash or motion can still be discarded cheaply.
+        if (!wheel_on_ground && wake.power < 0.005f && speed < 0.5f) continue;
+
+        wheel::TrafficAircraftContact wheel_contact;
+        wheel_contact.id = ids[i];
+        wheel_contact.x = x[i];
+        wheel_contact.z = z[i];
+        wheel_contact.heading_deg = wake.heading;
+        wheel_contact.vx = finite_or(vx[i]);
+        wheel_contact.vz = finite_or(vz[i]);
+        wheel_contact.nose_forward_m = footprint.nose_forward_m;
+        wheel_contact.main_aft_m = footprint.main_aft_m;
+        wheel_contact.main_half_track_m = footprint.main_half_track_m;
+        wheel_contact.contact_radius_m = footprint.contact_radius_m;
+        wheel_contact.on_ground = wheel_on_ground;
+
+        candidates.push_back({wake, wheel_contact, d2});
       }
 
       if (static_cast<int>(candidates.size()) > target_cap) {
@@ -188,8 +211,15 @@ void Runtime::update_traffic_wakes(float dt, float aircraft_x, float aircraft_z)
       }
 
       traffic_wakes_ = {};
-      for (size_t i = 0; i < candidates.size() && i < traffic_wakes_.size(); ++i)
+      std::array<wheel::TrafficAircraftContact, 32> wheel_contacts{};
+      std::size_t wheel_count = 0;
+      for (size_t i = 0; i < candidates.size() && i < traffic_wakes_.size(); ++i) {
         traffic_wakes_[i] = candidates[i].wake;
+        if (candidates[i].wheel_contact.on_ground && wheel_count < wheel_contacts.size())
+          wheel_contacts[wheel_count++] = candidates[i].wheel_contact;
+      }
+      wheel::update_traffic_aircraft_contacts(
+          wheel_count ? wheel_contacts.data() : nullptr, wheel_count);
 
       if (!traffic_detected_logged_ && !candidates.empty()) {
         log("TCAS traffic detected: " + std::to_string(candidates.size()) +
