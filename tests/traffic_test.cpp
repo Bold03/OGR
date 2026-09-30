@@ -18,6 +18,17 @@ int main() {
   assert(b77w.range_m > b738.range_m);
   assert(b738.range_m > c172.range_m);
 
+  const auto c172_gear = gear_footprint(c172.kind);
+  const auto at76_gear = gear_footprint(at76.kind);
+  const auto b738_gear = gear_footprint(b738.kind);
+  const auto b77w_gear = gear_footprint(b77w.kind);
+  assert(c172_gear.nose_forward_m < at76_gear.nose_forward_m);
+  assert(at76_gear.nose_forward_m < b738_gear.nose_forward_m);
+  assert(b738_gear.nose_forward_m < b77w_gear.nose_forward_m);
+  assert(c172_gear.main_half_track_m < b738_gear.main_half_track_m);
+  assert(b738_gear.main_half_track_m < b77w_gear.main_half_track_m);
+  assert(c172_gear.contact_radius_m < b77w_gear.contact_radius_m);
+
   const float parked = estimated_power(0.0f, 0.0f, true, b738);
   const float taxi = estimated_power(0.0f, 7.0f, true, b738);
   const float takeoff = estimated_power(0.0f, 55.0f, true, b738);
