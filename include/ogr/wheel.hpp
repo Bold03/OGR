@@ -34,6 +34,55 @@ inline float recover_linear(float amount, float dt, float recovery_s) {
   return std::max(0.0f, amount - dt / seconds);
 }
 
+// X-Plane 11's rain_percent is normally a ratio, while some weather providers
+// and future/alternate datarefs may expose percentage-style values. Normalize
+// both forms conservatively so 25 means 25% rather than instantly saturating.
+inline float normalize_precipitation(float raw) {
+  if (!std::isfinite(raw) || raw <= 0.0f) return 0.0f;
+  if (raw > 1.5f) raw *= 0.01f;
+  return std::clamp(raw, 0.0f, 1.0f);
+}
+
+inline float wetness_target(float precipitation) {
+  const float p = normalize_precipitation(precipitation);
+  if (p <= 0.005f) return 0.0f;
+  return std::clamp(0.15f + p * 0.85f, 0.0f, 1.0f);
+}
+
+// Wetness builds quickly once rain starts but dries much more slowly after the
+// rain stops. Exponential approach keeps the result stable across frame rates.
+inline float approach_wetness(float current, float target, float dt,
+                              float wetting_s = 18.0f,
+                              float drying_s = 240.0f) {
+  current = std::clamp(std::isfinite(current) ? current : 0.0f, 0.0f, 1.0f);
+  target = std::clamp(std::isfinite(target) ? target : 0.0f, 0.0f, 1.0f);
+  if (!std::isfinite(dt) || dt <= 0.0f) return current;
+  const float tau = std::max(0.25f, target > current ? wetting_s : drying_s);
+  const float alpha = 1.0f - std::exp(-std::min(dt, 5.0f) / tau);
+  return std::clamp(current + (target - current) * alpha, 0.0f, 1.0f);
+}
+
+// Fully wet blades keep about 82% of the dry bend magnitude and respond through
+// a longer low-pass time constant, making wind/prop/jet motion feel heavier.
+inline float wet_bend_scale(float wetness) {
+  const float wet = std::clamp(std::isfinite(wetness) ? wetness : 0.0f, 0.0f, 1.0f);
+  return 1.0f - 0.18f * wet;
+}
+
+inline float wet_filter_seconds(float wetness) {
+  const float wet = std::clamp(std::isfinite(wetness) ? wetness : 0.0f, 0.0f, 1.0f);
+  return 0.02f + 0.22f * wet;
+}
+
+inline float wet_track_recovery_seconds(float wetness,
+                                        float dry_seconds = 5.5f,
+                                        float wet_seconds = 32.0f) {
+  const float wet = std::clamp(std::isfinite(wetness) ? wetness : 0.0f, 0.0f, 1.0f);
+  const float dry = std::max(0.25f, dry_seconds);
+  const float soaked = std::max(dry, wet_seconds);
+  return dry + (soaked - dry) * wet;
+}
+
 inline void normalize_or(float x, float z, float fallback_x, float fallback_z,
                          float& out_x, float& out_z) {
   const float mag = std::hypot(x, z);
