@@ -26,6 +26,16 @@ int main() {
   if (!(half > 0.45f && half < 0.55f))
     return fail("contact falloff should be smooth around half radius");
 
+  if (!close_to(ogr::wheel::motion_weight(0.0f), 0.0f))
+    return fail("parked wheel must not flatten grass");
+  if (!close_to(ogr::wheel::motion_weight(0.10f), 0.0f))
+    return fail("tiny parked-aircraft jitter must be ignored");
+  const float slow_roll = ogr::wheel::motion_weight(0.40f);
+  if (!(slow_roll > 0.0f && slow_roll < 1.0f))
+    return fail("very slow taxi should ramp wheel flattening smoothly");
+  if (!close_to(ogr::wheel::motion_weight(0.80f), 1.0f))
+    return fail("normal taxi motion should reach full wheel-track strength");
+
   float amount = 1.0f;
   amount = ogr::wheel::recover_linear(amount, 2.75f, 5.5f);
   if (!close_to(amount, 0.5f, 0.001f))
@@ -44,6 +54,6 @@ int main() {
   if (!close_to(x, 0.0f) || !close_to(z, -1.0f))
     return fail("stationary wheel fallback direction is incorrect");
 
-  std::cout << "OGR wheel flatten test passed\n";
+  std::cout << "OGR wheel rolling-only flatten test passed\n";
   return 0;
 }
