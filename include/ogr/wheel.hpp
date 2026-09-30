@@ -17,6 +17,21 @@ inline float contact_weight(float distance_m, float radius_m) {
   return smoothstep01(1.0f - std::max(0.0f, distance_m) / radius_m);
 }
 
+// Wheel tracks are a movement effect, not a static weight effect. Keep tiny
+// position jitter from a parked aircraft from flattening grass, then ramp to
+// full strength during a very slow taxi. The default 0.12 m/s start threshold
+// is ~0.23 kt and full strength at 0.75 m/s is ~1.46 kt.
+inline float motion_weight(float speed_mps,
+                           float start_mps = 0.12f,
+                           float full_mps = 0.75f) {
+  if (!std::isfinite(speed_mps)) return 0.0f;
+  const float start = std::max(0.0f, start_mps);
+  const float full = std::max(start + 0.01f, full_mps);
+  if (speed_mps <= start) return 0.0f;
+  if (speed_mps >= full) return 1.0f;
+  return smoothstep01((speed_mps - start) / (full - start));
+}
+
 inline float recover_linear(float amount, float dt, float recovery_s) {
   amount = std::clamp(amount, 0.0f, 1.0f);
   if (amount <= 0.0f || !std::isfinite(dt) || dt <= 0.0f) return amount;
