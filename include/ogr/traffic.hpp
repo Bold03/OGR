@@ -26,6 +26,32 @@ struct Profile {
   float rpm_ratio{0.85f};
 };
 
+// TCAS/online traffic does not expose the remote aircraft's individual gear
+// coordinates. OGR therefore uses a deliberately simple three-point virtual
+// gear footprint: one nose-wheel contact and a left/right main pair. The
+// footprint scales by broad aircraft class so a C172 does not leave a B777-
+// sized track, while keeping the hot grass-contact loop very cheap.
+struct GearFootprint {
+  float nose_forward_m{6.5f};
+  float main_aft_m{4.8f};
+  float main_half_track_m{2.8f};
+  float contact_radius_m{1.55f};
+};
+
+inline GearFootprint gear_footprint(Kind kind) {
+  switch (kind) {
+    case Kind::light_prop:
+      return {1.5f, 0.8f, 1.1f, 1.10f};
+    case Kind::turboprop:
+      return {4.8f, 3.4f, 2.2f, 1.35f};
+    case Kind::heavy_jet:
+      return {10.0f, 8.0f, 4.5f, 1.95f};
+    case Kind::jet:
+    default:
+      return {6.5f, 4.8f, 2.8f, 1.55f};
+  }
+}
+
 inline std::string normalize_icao(std::string_view raw) {
   std::string out;
   out.reserve(raw.size());
