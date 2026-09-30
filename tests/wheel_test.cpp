@@ -26,20 +26,21 @@ int main() {
   if (!(half > 0.45f && half < 0.55f))
     return fail("contact falloff should be smooth around half radius");
 
-  if (!close_to(ogr::wheel::motion_weight(0.0f), 0.0f))
-    return fail("parked wheel must not flatten grass");
-  if (!close_to(ogr::wheel::motion_weight(0.10f), 0.0f))
-    return fail("tiny parked-aircraft jitter must be ignored");
-  const float slow_roll = ogr::wheel::motion_weight(0.40f);
-  if (!(slow_roll > 0.0f && slow_roll < 1.0f))
-    return fail("very slow taxi should ramp wheel flattening smoothly");
-  if (!close_to(ogr::wheel::motion_weight(0.80f), 1.0f))
-    return fail("normal taxi motion should reach full wheel-track strength");
+  // Recovery may run before contact is evaluated in the runtime. A stationary
+  // tire must immediately re-apply its pressure so grass cannot stand back up
+  // while the aircraft is parked on top of it.
+  float held = 1.0f;
+  held = ogr::wheel::recover_linear(held, 1.0f, 5.5f);
+  if (!(held < 1.0f))
+    return fail("recovery pre-step should reduce the stored crush amount");
+  held = ogr::wheel::apply_contact(held, 1.0f);
+  if (!close_to(held, 1.0f))
+    return fail("stationary full wheel contact must hold grass fully flattened");
 
   float amount = 1.0f;
   amount = ogr::wheel::recover_linear(amount, 2.75f, 5.5f);
   if (!close_to(amount, 0.5f, 0.001f))
-    return fail("grass should recover linearly over the configured time");
+    return fail("grass should recover linearly after wheel contact leaves");
   amount = ogr::wheel::recover_linear(amount, 2.75f, 5.5f);
   if (!close_to(amount, 0.0f, 0.001f))
     return fail("grass should return upright after recovery time");
@@ -54,6 +55,6 @@ int main() {
   if (!close_to(x, 0.0f) || !close_to(z, -1.0f))
     return fail("stationary wheel fallback direction is incorrect");
 
-  std::cout << "OGR wheel rolling-only flatten test passed\n";
+  std::cout << "OGR wheel contact-pressure flatten test passed\n";
   return 0;
 }
