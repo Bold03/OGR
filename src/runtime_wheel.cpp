@@ -16,6 +16,7 @@
 namespace {
 
 constexpr int kWheelSlots = 10;
+constexpr std::size_t kTrafficWheelSlots = 96; // up to 32 TCAS aircraft * 3 virtual gear contacts
 constexpr float kSampleIntervalS = 0.02f;
 constexpr float kRecoveryS = 5.5f;
 // The exported grass blades reach roughly 32 degrees when a bend dataref has
@@ -48,6 +49,7 @@ struct WheelRuntimeState {
   bool initialized{};
   bool log_written{};
   bool contact_logged{};
+  bool traffic_contact_logged{};
   bool available{};
   XPLMDataRef time_ref{};
   XPLMDataRef aircraft_x_ref{};
@@ -66,6 +68,8 @@ struct WheelRuntimeState {
   std::array<float, kWheelSlots> previous_dir_z{};
   std::array<unsigned char, kWheelSlots> previous_valid{};
   std::array<WheelContact, kWheelSlots> contacts{};
+  std::array<WheelContact, kTrafficWheelSlots> traffic_contacts{};
+  std::size_t traffic_contact_count{};
   std::unordered_map<XPLMInstanceRef, InstanceFlattenState> instance_states;
 };
 
@@ -103,7 +107,7 @@ void ensure_wheel_refs() {
     if (g_wheels.available) {
       write_log("[OGR] Wheel-track grass interaction armed: touching gear holds contacted grass near 90 degrees even while parked; recovery starts after the wheel leaves\n");
     } else {
-      write_log("[OGR] Wheel-track grass interaction unavailable: required X-Plane gear datarefs were not found\n");
+      write_log("[OGR] User wheel-track datarefs unavailable; TCAS traffic wheel flattening can still operate when traffic contacts are published\n");
     }
     g_wheels.log_written = true;
   }
@@ -248,7 +252,7 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   }
 
   sample_wheels_if_needed();
-  if (!g_wheels.available) {
+  if (!g_wheels.available && g_wheels.traffic_contact_count == 0) {
     real_instance_set_position(instance, position, data);
     return;
   }
@@ -270,8 +274,8 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
 
   float best = 0.0f;
   const WheelContact* best_contact = nullptr;
-  for (const auto& contact : g_wheels.contacts) {
-    if (!contact.active) continue;
+  const auto consider_contact = [&](const WheelContact& contact) {
+    if (!contact.active) return;
     const float dx = position->x - contact.x;
     const float dz = position->z - contact.z;
     const float weight = ogr::wheel::contact_weight(std::hypot(dx, dz), contact.radius_m);
@@ -279,7 +283,12 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
       best = weight;
       best_contact = &contact;
     }
-  }
+  };
+
+  for (const auto& contact : g_wheels.contacts)
+    consider_contact(contact);
+  for (std::size_t i = 0; i < g_wheels.traffic_contact_count; ++i)
+    consider_contact(g_wheels.traffic_contacts[i]);
 
   if (best_contact && best > 0.0f) {
     if (best >= state.amount * 0.70f) {
@@ -287,10 +296,9 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
       state.dir_z = best_contact->dir_z;
     }
     // Static tire pressure is a continuous contact, not a one-shot track.
-    // Re-applying the spatial contact weight every update keeps the grass down
-    // indefinitely while the wheel remains over it. Recovery only wins after
-    // the wheel moves away or loses ground contact.
-    state.amount = std::max(state.amount, best);
+    // This applies equally to the user aircraft and TCAS/online traffic: as
+    // long as a virtual tire remains over the clump, recovery cannot lift it.
+    state.amount = ogr::wheel::apply_contact(state.amount, best);
   }
 
   if (state.amount <= 0.001f) {
@@ -306,9 +314,10 @@ void ogr_instance_set_position(XPLMInstanceRef instance,
   }
 
   // Use the OBJ's own per-blade bend pivots for wheel flattening. Full contact
-  // takes the blade to roughly 90 degrees whether the aircraft is rolling or
-  // parked. The last meaningful wheel-travel direction is retained when the
-  // aircraft stops, avoiding direction flicker from tiny position jitter.
+  // takes the blade to roughly 90 degrees whether the source is the user's gear
+  // or a TCAS traffic virtual wheel. The last meaningful movement direction is
+  // used for the user aircraft; traffic uses reported velocity when available
+  // and aircraft heading while stationary.
   const ogr::grass_math::Vector2 wheel_world{state.dir_x, state.dir_z};
   const auto wheel_local = ogr::grass_math::world_to_object(wheel_world, position->heading);
   const float amount = std::clamp(state.amount, 0.0f, 1.0f);
@@ -339,6 +348,75 @@ void ogr_destroy_instance(XPLMInstanceRef instance) {
 
 namespace ogr::wheel {
 
+void update_traffic_aircraft_contacts(const TrafficAircraftContact* contacts,
+                                      std::size_t count) {
+  g_wheels.traffic_contact_count = 0;
+  if (!contacts || count == 0) return;
+
+  const std::size_t aircraft_count = std::min<std::size_t>(count, kTrafficWheelSlots / 3u);
+  std::size_t grounded_aircraft = 0;
+
+  const auto append_contact = [&](float x, float z, float dir_x, float dir_z,
+                                  float radius_m) {
+    if (g_wheels.traffic_contact_count >= g_wheels.traffic_contacts.size()) return;
+    auto& out = g_wheels.traffic_contacts[g_wheels.traffic_contact_count++];
+    out = {};
+    out.active = true;
+    out.x = x;
+    out.z = z;
+    normalize_or(dir_x, dir_z, 0.0f, -1.0f, out.dir_x, out.dir_z);
+    out.radius_m = std::clamp(radius_m, 0.8f, 2.4f);
+  };
+
+  for (std::size_t i = 0; i < aircraft_count; ++i) {
+    const auto& aircraft = contacts[i];
+    if (!aircraft.id || !aircraft.on_ground ||
+        !std::isfinite(aircraft.x) || !std::isfinite(aircraft.z))
+      continue;
+
+    const float heading = finite_or(aircraft.heading_deg) * ogr::grass_math::pi / 180.0f;
+    const float forward_x = std::sin(heading);
+    const float forward_z = -std::cos(heading);
+    const float right_x = std::cos(heading);
+    const float right_z = std::sin(heading);
+
+    float crush_dir_x = forward_x;
+    float crush_dir_z = forward_z;
+    const float speed = std::hypot(finite_or(aircraft.vx), finite_or(aircraft.vz));
+    if (speed > 0.20f)
+      normalize_or(aircraft.vx, aircraft.vz, forward_x, forward_z,
+                   crush_dir_x, crush_dir_z);
+
+    const float nose_forward = std::clamp(std::abs(finite_or(aircraft.nose_forward_m)), 0.5f, 14.0f);
+    const float main_aft = std::clamp(std::abs(finite_or(aircraft.main_aft_m)), 0.3f, 12.0f);
+    const float main_track = std::clamp(std::abs(finite_or(aircraft.main_half_track_m)), 0.4f, 6.5f);
+    const float radius = std::clamp(std::abs(finite_or(aircraft.contact_radius_m, 1.5f)), 0.8f, 2.4f);
+
+    append_contact(aircraft.x + forward_x * nose_forward,
+                   aircraft.z + forward_z * nose_forward,
+                   crush_dir_x, crush_dir_z, radius);
+
+    const float main_x = aircraft.x - forward_x * main_aft;
+    const float main_z = aircraft.z - forward_z * main_aft;
+    append_contact(main_x - right_x * main_track,
+                   main_z - right_z * main_track,
+                   crush_dir_x, crush_dir_z, radius);
+    append_contact(main_x + right_x * main_track,
+                   main_z + right_z * main_track,
+                   crush_dir_x, crush_dir_z, radius);
+    ++grounded_aircraft;
+  }
+
+  if (grounded_aircraft > 0 && !g_wheels.traffic_contact_logged) {
+    const std::string line = "[OGR] TCAS traffic wheel flattening active: " +
+        std::to_string(grounded_aircraft) + " ground aircraft mapped to " +
+        std::to_string(g_wheels.traffic_contact_count) +
+        " virtual tire contact(s)\n";
+    XPLMDebugString(line.c_str());
+    g_wheels.traffic_contact_logged = true;
+  }
+}
+
 void initialize_runtime() {
   ensure_wheel_refs();
 }
@@ -350,8 +428,8 @@ void reset_runtime() {
 } // namespace ogr::wheel
 
 // OGR's existing runtime is deliberately included as one translation unit so
-// replay can wrap the proven live runtime. v0.6.5 treats wheel contact as real
-// tire pressure: rolling or parked gear keeps grass flat until contact ends.
+// replay can wrap the proven live runtime. v0.7 adds estimated TCAS/online/AI
+// wheel contacts while preserving v0.6.5's parked user-aircraft tire pressure.
 #define XPLMInstanceSetPosition ogr_instance_set_position
 #define XPLMDestroyInstance ogr_destroy_instance
 #include "runtime_replay.cpp"
