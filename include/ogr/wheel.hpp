@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 
 namespace ogr::wheel {
@@ -50,6 +51,28 @@ inline void normalize_or(float x, float z, float fallback_x, float fallback_z,
     out_z = -1.0f;
   }
 }
+
+// X-Plane TCAS traffic exposes aircraft position/heading, not individual tire
+// coordinates. traffic.cpp supplies an estimated aircraft-level footprint and
+// runtime_wheel.cpp expands it into one nose + two main wheel contacts.
+struct TrafficAircraftContact {
+  int id{};
+  float x{};
+  float z{};
+  float heading_deg{};
+  float vx{};
+  float vz{};
+  float nose_forward_m{};
+  float main_aft_m{};
+  float main_half_track_m{};
+  float contact_radius_m{1.5f};
+  bool on_ground{};
+};
+
+// Replaces the current cached set. Passing nullptr/0 clears online/AI wheel
+// contacts immediately; user-aircraft wheel contacts remain independent.
+void update_traffic_aircraft_contacts(const TrafficAircraftContact* contacts,
+                                      std::size_t count);
 
 // Runtime hooks are implemented in runtime_wheel.cpp. Explicit initialization
 // lets the plugin report wheel-dataref availability at startup, even before the
