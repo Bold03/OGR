@@ -13,6 +13,11 @@ struct GroundWash {
   float influence{};
 };
 
+inline float smoothstep01(float value) {
+  const float t = std::clamp(value, 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
 inline float radius_from_disc_area(float area_m2, float fallback_m = 5.5f) {
   if (!std::isfinite(area_m2) || area_m2 <= 1.0f)
     return std::clamp(fallback_m, 2.0f, 12.0f);
@@ -24,9 +29,6 @@ inline float power_from_state(float rpm_ratio, float collective_ratio) {
   const float collective = std::clamp(
       std::abs(std::isfinite(collective_ratio) ? collective_ratio : 0.0f), 0.0f, 1.0f);
 
-  // Rotor RPM is normally governor-held, while induced flow changes strongly
-  // with collective. Keep a small idle/downwash term at low collective so a
-  // spinning rotor still disturbs nearby grass without looking like takeoff power.
   const float loading = 0.22f + 0.78f * collective;
   return std::clamp(rpm * rpm * loading, 0.0f, 1.25f);
 }
@@ -54,17 +56,14 @@ inline GroundWash ground_wash(grass_math::Point2 grass,
   const float dz = grass.z - rotor_center.z;
   const float distance = std::hypot(dx, dz);
 
-  // Downwash hits the ground and spreads radially. As the helicopter climbs,
-  // the footprint grows while peak horizontal force falls off. The footprint
-  // stays bounded so a high hover cannot animate a huge portion of the airport.
   const float footprint = std::clamp(radius * 1.20f + height * 0.62f,
                                      radius * 1.10f, radius * 3.80f);
   if (distance >= footprint || distance < 0.05f)
     return out;
 
   const float normalized = distance / footprint;
-  const float inner = grass_math::smoothstep01(normalized / 0.22f);
-  const float outer = grass_math::smoothstep01((1.0f - normalized) / 0.42f);
+  const float inner = smoothstep01(normalized / 0.22f);
+  const float outer = smoothstep01((1.0f - normalized) / 0.42f);
   const float radial_shape = inner * outer;
   if (radial_shape <= 0.0001f)
     return out;
@@ -80,8 +79,6 @@ inline GroundWash ground_wash(grass_math::Point2 grass,
   const float tangent_x = -radial_z * (swirl_sign < 0.0f ? -1.0f : 1.0f);
   const float tangent_z = radial_x * (swirl_sign < 0.0f ? -1.0f : 1.0f);
 
-  // Ground flow is mostly radial. A modest tangential component makes the grass
-  // read as rotor-driven instead of a circular explosion, without being costly.
   constexpr float swirl = 0.16f;
   out.bend.x = (radial_x + tangent_x * swirl) * influence;
   out.bend.z = (radial_z + tangent_z * swirl) * influence;
