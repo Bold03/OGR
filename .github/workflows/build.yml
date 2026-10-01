@@ -66,15 +66,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.9.1-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.9.2-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.9.1-build-${{ github.run_number }}"
+          TAG="ogr-v0.9.2-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.9.1-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.9.1 Windows Build #${{ github.run_number }}" \
-            --notes "Rotor radial hotfix: helicopter main-rotor airflow now dominates the local grass field instead of allowing the legacy fixed-wing prop/engine estimator to leave a fake one-directional cone behind the fuselage. The radial footprint starts much closer to the hub, is slightly stronger, and fades back to normal weather/traffic animation outside the rotor-dominant region. Rotor redline handling now accepts both rad/s-style and obvious RPM-style values so XP11 helicopters do not get an artificially weak rotor-power ratio. Wheel flattening still has priority, wet grass and persistent tracks remain enabled, and no extra all-candidate scan was added."
+            "OGR-v0.9.2-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.9.2 Windows Build #${{ github.run_number }}" \
+            --notes "Helicopter + crush stability hotfix: XP11 main-rotor detection now prefers sim/flightmodel/engine/POINT_tacrad, with flightmodel2 prop speed, cockpit prop RPM and turbine N2 fallbacks. OGR also reads POINT_XYZ when available to place the radial field on the actual main-rotor hub rather than only the aircraft CG. The 360-degree ground-flow footprint is stronger and wider while the old fixed-wing rear cone is fully faded inside the rotor-dominant region. Wheel/gear crush visuals now lock hard direction reversals while a clump remains flattened, eliminating the left-right alternating flicker seen between nearby contacts without reducing the approximately 90-degree flatten angle. Wet grass, persistent tracks, TCAS/online traffic interaction, 2 km LOD, Direct DSF and replay-aware engine/wind remain enabled."
