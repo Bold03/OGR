@@ -57,9 +57,6 @@ jobs:
           Copy-Item release/WED-Starter/OafishGrass/grass_atlas.png package/OafishGrass_Library/OafishGrass/grass_atlas.png
           Copy-Item release/WED-Starter/OafishGrass/ogr_marker.png package/OafishGrass_Library/OafishGrass/ogr_marker.png
 
-          # Blender-exported grass carries the original 914.4 m object gate.
-          # Runtime instance count stays capped while sparse far-ring instances
-          # are allowed to remain visible through OGR's 2 km LOD.
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
           $lodObjects = Get-ChildItem package -Recurse -Filter "grass_*.obj"
           foreach ($obj in $lodObjects) {
@@ -69,15 +66,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.9.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.9.1-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.9.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.9.1-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.9.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.9.0 Windows Build #${{ github.run_number }}" \
-            --notes "Helicopter rotor-wash build: native X-Plane rotorcraft are detected through the rotor-clutch dataref, with main-rotor RPM, helicopter collective and prop-disc area used when available. Grass beneath a low hover now bends outward in a radial ground-flow footprint with a small rotational swirl; the footprint expands and weakens naturally with hover height and stops beyond about 35 m. Rotor power follows governed RPM plus collective, wheel flattening still has priority at roughly 90 degrees, and the hook adds no full-candidate scan so the low-spec performance profile is preserved. This first rotor build targets the user aircraft/main rotor and is live-only during normal flight; existing wet grass, persistent wet tracks, TCAS/IVAO/VATSIM traffic interaction, 2 km three-stage LOD, Direct DSF parsing and replay-aware engine/wind history remain enabled."
+            "OGR-v0.9.1-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.9.1 Windows Build #${{ github.run_number }}" \
+            --notes "Rotor radial hotfix: helicopter main-rotor airflow now dominates the local grass field instead of allowing the legacy fixed-wing prop/engine estimator to leave a fake one-directional cone behind the fuselage. The radial footprint starts much closer to the hub, is slightly stronger, and fades back to normal weather/traffic animation outside the rotor-dominant region. Rotor redline handling now accepts both rad/s-style and obvious RPM-style values so XP11 helicopters do not get an artificially weak rotor-power ratio. Wheel flattening still has priority, wet grass and persistent tracks remain enabled, and no extra all-candidate scan was added."
