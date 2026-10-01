@@ -1,4 +1,4 @@
-OAFISH GRASS RUNTIME v0.9.0 - START HERE
+OAFISH GRASS RUNTIME v0.9.1 - START HERE
 ========================================
 
 1) DOWNLOAD the latest OGR release.
@@ -45,28 +45,35 @@ OAFISH GRASS RUNTIME v0.9.0 - START HERE
      [OGR] Wet grass response armed: ...
      [OGR] Wet grass active: blade response is heavier and tire tracks now recover more slowly
 
-7) HELICOPTER ROTOR WASH (v0.9.0):
+7) HELICOPTER ROTOR WASH (v0.9.1):
    - Native X-Plane rotorcraft are detected from the aircraft rotor-clutch flag.
    - OGR reads main-rotor RPM, helicopter collective and prop-disc area when
      those native datarefs are available.
    - A low hover pushes grass radially outward from the rotor center instead of
      using the jet/prop cone model.
+   - v0.9.1 fixes the case where the legacy fixed-wing/prop estimator made only
+     the grass behind the helicopter move. Inside the rotor-dominant region that
+     old rear cone is faded out and the main rotor owns the local airflow.
+   - The radial effect now starts much closer to the hub and is slightly stronger,
+     so grass around and beneath the main rotor should react in every direction.
+   - Rotor-redline handling accepts both rad/s-style and obvious RPM-style values,
+     preventing some XP11 helicopters from getting an artificially weak effect.
    - A small rotational swirl is added according to rotor direction.
    - The footprint grows as the helicopter rises but the force weakens with
      height; rotor wash is stopped above about 35 m to keep the effect local.
    - Wheel flattening still has priority, so a tire can hold grass near 90 degrees
      even while rotor wash is present.
-   - The first rotor build targets the USER aircraft and a single/main-rotor
+   - The rotor system targets the USER aircraft and a single/main-rotor
      approximation. Tandem/coaxial multi-disc placement and online helicopter
      rotor wash are future extensions.
-   - Rotor wash is intentionally live-only in v0.9.0; it is disabled while
-     X-Plane Replay is active rather than inventing historical rotor state.
+   - Rotor wash is live-only; it is disabled while X-Plane Replay is active rather
+     than inventing historical rotor state.
    - The implementation is a final-position hook only and adds no new scan over
      all 10,000 streamed grass candidates.
 
    Useful Log.txt messages:
      [OGR] Helicopter rotor-wash detector armed: ...
-     [OGR] Helicopter rotor wash active: main rotor estimated at N m diameter; ...
+     [OGR] Helicopter rotor wash active: main rotor estimated at N m diameter; radial main-rotor flow now overrides the old one-directional rear prop/engine cone nearby
 
 8) ONLINE / AI TRAFFIC GRASS INTERACTION:
    - X-Plane 11.50+ TCAS target arrays are read only; OGR does not acquire,
@@ -125,7 +132,7 @@ OAFISH GRASS RUNTIME v0.9.0 - START HERE
      IVAO/VATSIM traffic positions during X-Plane replay.
    - Wetness currently follows the live/current weather state rather than being
      stored as a separate historical replay channel.
-   - Helicopter rotor wash is live-only in v0.9.0 and is disabled in replay.
+   - Helicopter rotor wash is live-only and is disabled in replay.
 
 DEFAULTS:
 - Draw radius setting: 2000 m
