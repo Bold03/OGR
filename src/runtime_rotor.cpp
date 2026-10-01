@@ -16,7 +16,7 @@ constexpr float kRotorSampleIntervalS = 0.02f;
 constexpr float kFallbackRotorRadiusM = 5.5f;
 constexpr float kFallbackRotorRedlineRadS = 45.0f;
 constexpr float kRotorMaxHeightM = 35.0f;
-constexpr float kRotorStrength = 1.12f;
+constexpr float kRotorStrength = 1.35f;
 
 struct RotorHookState {
   bool initialized{};
@@ -145,7 +145,7 @@ void sample_rotor_if_needed() {
     g_rotor.radius_m = ogr::rotor::radius_from_disc_area(largest_area, kFallbackRotorRadiusM);
     const float redline_raw = g_rotor.redline_ref
         ? rotor_finite_or(XPLMGetDataf(g_rotor.redline_ref)) : 0.0f;
-    const float redline = redline_raw > 1.0f ? redline_raw : kFallbackRotorRedlineRadS;
+    const float redline = ogr::rotor::rotor_reference_rad_s(redline_raw, kFallbackRotorRedlineRadS);
     const float rotor_speed = rotor_index < speed_count
         ? std::abs(rotor_finite_or(speed[static_cast<std::size_t>(rotor_index)])) : 0.0f;
     g_rotor.rpm_ratio = std::clamp(rotor_speed / redline, 0.0f, 1.20f);
@@ -167,7 +167,7 @@ void sample_rotor_if_needed() {
     g_rotor.center_y = static_cast<float>(aircraft_y) + hub_above_cg;
   }
 
-  const float tau = target_power > g_rotor.power ? 0.14f : 0.38f;
+  const float tau = target_power > g_rotor.power ? 0.12f : 0.32f;
   const float alpha = 1.0f - std::exp(-dt / tau);
   g_rotor.power += (target_power - g_rotor.power) * alpha;
   if (g_rotor.power < 0.001f) g_rotor.power = 0.0f;
@@ -176,7 +176,7 @@ void sample_rotor_if_needed() {
   if (g_rotor.active && !g_rotor.active_logged) {
     rotor_log("Helicopter rotor wash active: main rotor estimated at " +
               std::to_string(static_cast<int>(std::lround(g_rotor.radius_m * 2.0f))) +
-              " m diameter; grass uses radial ground flow with light rotational swirl");
+              " m diameter; radial main-rotor flow now overrides the old one-directional rear prop/engine cone nearby");
     g_rotor.active_logged = true;
   }
 }
@@ -195,6 +195,8 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
     return;
   }
 
+  // Wheel flattening still wins. Wheel datarefs intentionally exceed the normal
+  // authored range in order to reach approximately 90 degrees.
   if (data) {
     float max_abs = 0.0f;
     for (int i = 0; i < 8; ++i)
@@ -205,11 +207,19 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
     }
   }
 
+  const float rotor_height = g_rotor.center_y - position->y;
+  const float dx = position->x - g_rotor.center_x;
+  const float dz = position->z - g_rotor.center_z;
+  const float distance = std::hypot(dx, dz);
+  const float dominance = ogr::rotor::radial_dominance(
+      distance, g_rotor.radius_m, rotor_height, g_rotor.power);
+
   const auto wash = ogr::rotor::ground_wash(
       {position->x, position->z}, {g_rotor.center_x, g_rotor.center_z},
-      g_rotor.center_y - position->y, g_rotor.radius_m, g_rotor.power,
+      rotor_height, g_rotor.radius_m, g_rotor.power,
       g_rotor.swirl_sign, kRotorStrength, kRotorMaxHeightM);
-  if (wash.influence <= 0.0001f) {
+
+  if (wash.influence <= 0.0001f && dominance <= 0.0001f) {
     XPLMInstanceSetPosition(instance, position, data);
     return;
   }
@@ -219,11 +229,19 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
     for (int i = 0; i < 8; ++i) modified[i] = rotor_finite_or(data[i]);
   }
 
+  // runtime.cpp's legacy prop/engine estimator interprets helicopter powerplants
+  // like forward-facing propulsors. That is what produced the screenshot where
+  // only grass behind the S-76 moved. Inside the rotor-dominant region, fade that
+  // base vector away before adding the true radial field. Farther away, normal
+  // weather and traffic animation resumes unchanged.
+  const float base_scale = 1.0f - std::clamp(dominance * 0.96f, 0.0f, 0.96f);
+  for (float& value : modified) value *= base_scale;
+
   const float now = rotor_now();
   const float spatial_phase = position->x * 0.23f + position->z * 0.17f;
   for (int group = 0; group < 4; ++group) {
     const float group_phase = spatial_phase + static_cast<float>(group) * 1.57f;
-    const float flutter = 0.88f + 0.12f * std::sin(now * 16.0f + group_phase);
+    const float flutter = 0.90f + 0.10f * std::sin(now * 16.0f + group_phase);
     const float variation = 0.94f + static_cast<float>(group) * 0.025f;
     const int xi = group * 2;
     const int zi = xi + 1;
