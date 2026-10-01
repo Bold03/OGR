@@ -21,6 +21,13 @@ int main() {
   if (!close_to(radius, 5.0f, 0.01f))
     return fail("disc area must convert back to rotor radius");
 
+  const float rpm_style = ogr::rotor::rotor_reference_rad_s(300.0f);
+  const float expected_rad_s = 300.0f * 2.0f * ogr::grass_math::pi / 60.0f;
+  if (!close_to(rpm_style, expected_rad_s, 0.02f))
+    return fail("obvious RPM-style rotor redline must convert to rad/s");
+  if (!close_to(ogr::rotor::rotor_reference_rad_s(32.0f), 32.0f, 0.01f))
+    return fail("rad/s-style rotor redline must remain unchanged");
+
   const float idle = ogr::rotor::power_from_state(1.0f, 0.0f);
   const float hover = ogr::rotor::power_from_state(1.0f, 0.65f);
   const float high_collective = ogr::rotor::power_from_state(1.0f, 1.0f);
@@ -33,6 +40,16 @@ int main() {
     return fail("grass east of rotor should receive outward ground flow");
   if (!(std::abs(wash.bend.z) > 0.0f))
     return fail("rotor ground flow should include a small rotational swirl");
+
+  const auto near_center = ogr::rotor::ground_wash(
+      {0.7f, 0.0f}, {0.0f, 0.0f}, 3.0f, 5.0f, hover, 1.0f, 1.0f, 35.0f);
+  if (!(near_center.influence > 0.05f))
+    return fail("main rotor field must no longer have a broad dead zone near the hub");
+
+  const float local_dominance = ogr::rotor::radial_dominance(8.0f, 5.0f, 3.0f, 1.0f);
+  const float far_dominance = ogr::rotor::radial_dominance(60.0f, 5.0f, 3.0f, 1.0f);
+  if (!(local_dominance > 0.5f && close_to(far_dominance, 0.0f)))
+    return fail("radial rotor field must suppress the old local rear cone but not distant animation");
 
   const auto reverse_swirl = ogr::rotor::ground_wash(
       {4.0f, 0.0f}, {0.0f, 0.0f}, 3.0f, 5.0f, hover, -1.0f, 1.0f, 35.0f);
