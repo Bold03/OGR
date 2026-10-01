@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Test grass, replay, traffic, LOD, wheel tracks, wet grass and direct DSF parser
+      - name: Test grass, replay, traffic, LOD, wheel tracks, wet grass, rotor wash and direct DSF parser
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Test WED area exporter fallback
@@ -69,15 +69,15 @@ jobs:
             [IO.File]::WriteAllText($obj.FullName, $patched, $utf8NoBom)
           }
 
-          Compress-Archive -Path package/* -DestinationPath "OGR-v0.8.0-win_x64-build-${{ github.run_number }}.zip" -Force
+          Compress-Archive -Path package/* -DestinationPath "OGR-v0.9.0-win_x64-build-${{ github.run_number }}.zip" -Force
 
       - name: Publish directly to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="ogr-v0.8.0-build-${{ github.run_number }}"
+          TAG="ogr-v0.9.0-build-${{ github.run_number }}"
           gh release create "$TAG" \
-            "OGR-v0.8.0-win_x64-build-${{ github.run_number }}.zip" \
-            --title "Oafish Grass Runtime v0.8.0 Windows Build #${{ github.run_number }}" \
-            --notes "Wet-grass build: OGR now samples X-Plane precipitation and accumulates a persistent wetness state. Wet grass responds more heavily to wind, prop wash, jet blast and traffic wake through a damped low-pass bend response, while keeping full 90-degree tire flattening. Dry wheel tracks still recover in about 5.5 seconds, but fully wet tracks can remain visible for about 32 seconds after the tire leaves; parked user and TCAS traffic tires continue to pin grass while weight remains on them. Wetness builds quickly in rain and dries gradually after rain stops. Existing TCAS/IVAO/VATSIM traffic wheels, 2 km three-stage LOD, shared library, 10,000 streamed candidates, Direct DSF parsing and replay-aware user engine/wind history remain enabled."
+            "OGR-v0.9.0-win_x64-build-${{ github.run_number }}.zip" \
+            --title "Oafish Grass Runtime v0.9.0 Windows Build #${{ github.run_number }}" \
+            --notes "Helicopter rotor-wash build: native X-Plane rotorcraft are detected through the rotor-clutch dataref, with main-rotor RPM, helicopter collective and prop-disc area used when available. Grass beneath a low hover now bends outward in a radial ground-flow footprint with a small rotational swirl; the footprint expands and weakens naturally with hover height and stops beyond about 35 m. Rotor power follows governed RPM plus collective, wheel flattening still has priority at roughly 90 degrees, and the hook adds no full-candidate scan so the low-spec performance profile is preserved. This first rotor build targets the user aircraft/main rotor and is live-only during normal flight; existing wet grass, persistent wet tracks, TCAS/IVAO/VATSIM traffic interaction, 2 km three-stage LOD, Direct DSF parsing and replay-aware engine/wind history remain enabled."
