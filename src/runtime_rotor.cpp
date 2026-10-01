@@ -49,11 +49,11 @@ struct RotorHookState {
 
 RotorHookState g_rotor;
 
-float finite_or(float value, float fallback = 0.0f) {
+float rotor_finite_or(float value, float fallback = 0.0f) {
   return std::isfinite(value) ? value : fallback;
 }
 
-double finite_or(double value, double fallback = 0.0) {
+double rotor_finite_or(double value, double fallback = 0.0) {
   return std::isfinite(value) ? value : fallback;
 }
 
@@ -95,7 +95,7 @@ void ensure_rotor_refs() {
 
 float rotor_now() {
   ensure_rotor_refs();
-  return g_rotor.time_ref ? finite_or(XPLMGetDataf(g_rotor.time_ref)) : 0.0f;
+  return g_rotor.time_ref ? rotor_finite_or(XPLMGetDataf(g_rotor.time_ref)) : 0.0f;
 }
 
 void sample_rotor_if_needed() {
@@ -135,7 +135,7 @@ void sample_rotor_if_needed() {
     int rotor_index = 0;
     float largest_area = 0.0f;
     for (int i = 0; i < area_count; ++i) {
-      const float candidate = std::max(0.0f, finite_or(area[static_cast<std::size_t>(i)]));
+      const float candidate = std::max(0.0f, rotor_finite_or(area[static_cast<std::size_t>(i)]));
       if (candidate > largest_area) {
         largest_area = candidate;
         rotor_index = i;
@@ -144,29 +144,25 @@ void sample_rotor_if_needed() {
 
     g_rotor.radius_m = ogr::rotor::radius_from_disc_area(largest_area, kFallbackRotorRadiusM);
     const float redline_raw = g_rotor.redline_ref
-        ? finite_or(XPLMGetDataf(g_rotor.redline_ref)) : 0.0f;
+        ? rotor_finite_or(XPLMGetDataf(g_rotor.redline_ref)) : 0.0f;
     const float redline = redline_raw > 1.0f ? redline_raw : kFallbackRotorRedlineRadS;
     const float rotor_speed = rotor_index < speed_count
-        ? std::abs(finite_or(speed[static_cast<std::size_t>(rotor_index)])) : 0.0f;
+        ? std::abs(rotor_finite_or(speed[static_cast<std::size_t>(rotor_index)])) : 0.0f;
     g_rotor.rpm_ratio = std::clamp(rotor_speed / redline, 0.0f, 1.20f);
     g_rotor.collective = rotor_index < collective_count
-        ? std::clamp(std::abs(finite_or(collective[static_cast<std::size_t>(rotor_index)])), 0.0f, 1.0f)
+        ? std::clamp(std::abs(rotor_finite_or(collective[static_cast<std::size_t>(rotor_index)])), 0.0f, 1.0f)
         : 0.65f;
-    g_rotor.swirl_sign = rotor_index < dir_count && finite_or(direction[static_cast<std::size_t>(rotor_index)]) < 0.0f
+    g_rotor.swirl_sign = rotor_index < dir_count && rotor_finite_or(direction[static_cast<std::size_t>(rotor_index)]) < 0.0f
         ? -1.0f : 1.0f;
 
     target_power = ogr::rotor::power_from_state(g_rotor.rpm_ratio, g_rotor.collective);
 
-    const double aircraft_x = finite_or(XPLMGetDatad(g_rotor.local_x_ref));
-    const double aircraft_y = finite_or(XPLMGetDatad(g_rotor.local_y_ref));
-    const double aircraft_z = finite_or(XPLMGetDatad(g_rotor.local_z_ref));
+    const double aircraft_x = rotor_finite_or(XPLMGetDatad(g_rotor.local_x_ref));
+    const double aircraft_y = rotor_finite_or(XPLMGetDatad(g_rotor.local_y_ref));
+    const double aircraft_z = rotor_finite_or(XPLMGetDatad(g_rotor.local_z_ref));
     g_rotor.center_x = static_cast<float>(aircraft_x);
     g_rotor.center_z = static_cast<float>(aircraft_z);
 
-    // X-Plane exposes prop disc area reliably across native rotorcraft, but a
-    // universal main-rotor hub coordinate is not available through the same
-    // simple datarefs. A radius-scaled CG offset is stable for the single-main-
-    // rotor helicopters this first implementation targets.
     const float hub_above_cg = std::clamp(g_rotor.radius_m * 0.24f, 1.1f, 3.0f);
     g_rotor.center_y = static_cast<float>(aircraft_y) + hub_above_cg;
   }
@@ -199,12 +195,10 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
     return;
   }
 
-  // Wheel flattening deliberately wins over rotor wash. The wheel wrapper uses
-  // values well above the normal authored bend range to reach ~90 degrees.
   if (data) {
     float max_abs = 0.0f;
     for (int i = 0; i < 8; ++i)
-      max_abs = std::max(max_abs, std::abs(finite_or(data[i])));
+      max_abs = std::max(max_abs, std::abs(rotor_finite_or(data[i])));
     if (max_abs > 1.55f) {
       XPLMInstanceSetPosition(instance, position, data);
       return;
@@ -222,7 +216,7 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
 
   float modified[8]{};
   if (data) {
-    for (int i = 0; i < 8; ++i) modified[i] = finite_or(data[i]);
+    for (int i = 0; i < 8; ++i) modified[i] = rotor_finite_or(data[i]);
   }
 
   const float now = rotor_now();
@@ -244,10 +238,6 @@ void ogr_rotor_instance_set_position(XPLMInstanceRef instance,
 
 } // namespace
 
-// runtime_wheel.cpp remains the owner of wheel flattening, wet-grass filtering,
-// traffic contacts, replay wrapping and the base Runtime translation unit. This
-// build inserts one extra final-position hook beneath it, so rotor wash stays a
-// cheap local effect and does not add another O(all-candidates) runtime pass.
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable: 4005)
