@@ -66,9 +66,8 @@ PLUGIN_API int XPluginStart(char* name, char* signature, char* description) {
   std::snprintf(description, 256, "%s", "WED-authored animated grass runtime for X-Plane 11/12");
 
   try {
-    XPLMDebugString("[OGR] Oafish Grass Runtime v0.9.1 starting\n");
+    XPLMDebugString("[OGR] Oafish Grass Runtime v0.9.2 starting\n");
 
-    // These must exist before an OBJ using them is loaded.
     for (int group = 0; group < 4; ++group) {
       refs.create("oafish/ogr/grass/bend_x_" + std::to_string(group), 0.0f, false, -1.0f, 1.0f);
       refs.create("oafish/ogr/grass/bend_z_" + std::to_string(group), 0.0f, false, -1.0f, 1.0f);
