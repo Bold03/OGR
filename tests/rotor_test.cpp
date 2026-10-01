@@ -28,6 +28,10 @@ int main() {
   if (!close_to(ogr::rotor::rotor_reference_rad_s(32.0f), 32.0f, 0.01f))
     return fail("rad/s-style rotor redline must remain unchanged");
 
+  const float xp11_ratio = ogr::rotor::rotor_ratio_from_speed(32.0f, 2700.0f, 45.0f);
+  if (!(xp11_ratio > 0.60f && xp11_ratio < 0.90f))
+    return fail("XP11 POINT_tacrad rotor must survive an unrelated high prop redline");
+
   const float idle = ogr::rotor::power_from_state(1.0f, 0.0f);
   const float hover = ogr::rotor::power_from_state(1.0f, 0.65f);
   const float high_collective = ogr::rotor::power_from_state(1.0f, 1.0f);
@@ -44,7 +48,7 @@ int main() {
   const auto near_center = ogr::rotor::ground_wash(
       {0.7f, 0.0f}, {0.0f, 0.0f}, 3.0f, 5.0f, hover, 1.0f, 1.0f, 35.0f);
   if (!(near_center.influence > 0.05f))
-    return fail("main rotor field must no longer have a broad dead zone near the hub");
+    return fail("main rotor field must not have a broad dead zone near the hub");
 
   const float local_dominance = ogr::rotor::radial_dominance(8.0f, 5.0f, 3.0f, 1.0f);
   const float far_dominance = ogr::rotor::radial_dominance(60.0f, 5.0f, 3.0f, 1.0f);
@@ -70,6 +74,17 @@ int main() {
       {100.0f, 0.0f}, {0.0f, 0.0f}, 3.0f, 5.0f, hover, 1.0f, 1.0f, 35.0f);
   if (!close_to(far.influence, 0.0f))
     return fail("far grass must not receive rotor wash");
+
+  const ogr::grass_math::Vector2 old_dir{1.0f, 0.0f};
+  const ogr::grass_math::Vector2 flipped{-1.0f, 0.0f};
+  const auto stable = ogr::rotor::stabilize_crush_direction(old_dir, flipped, true);
+  if (!(stable.x > 0.95f && std::abs(stable.z) < 0.05f))
+    return fail("hard wheel-crush direction reversal must remain locked");
+
+  const ogr::grass_math::Vector2 gentle_turn{0.8f, -0.6f};
+  const auto steered = ogr::rotor::stabilize_crush_direction(old_dir, gentle_turn, true);
+  if (!(steered.x > 0.0f && steered.z < 0.0f))
+    return fail("non-reversing wheel-crush direction should steer gradually");
 
   std::cout << "OGR helicopter rotor wash tests passed\n";
   return 0;
